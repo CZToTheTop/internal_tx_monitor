@@ -1,0 +1,15 @@
+# BSC 链 LISTA 代币 Transfer 监控示例
+# 基于测试交易: https://bscscan.com/tx/0x2ac796be3a9477ed58f45877e7608f1177d08d7777a0eb2e7ee9c6347940518b
+
+network: bsc_mainnet
+
+webhookUrl: https://your-ngrok-url.ngrok.io/webhook
+
+targets:
+  # 监控 LISTA 代币 Transfer 事件
+  - type: events
+    label: "LISTA Transfer"
+    addresses:
+      - "0xfceb31a79f71ac9cbdcf853519c1b12d379edc46"  # Lista DAO (LISTA)
+    topics:
+      - "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"  # Transfer(address,address,uint256)
