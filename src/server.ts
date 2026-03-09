@@ -77,5 +77,7 @@ export function startServer(
   port: number,
   host: string
 ): void {
-  app.listen(port, host);
+  app.listen(port, host, () => {
+    console.log(`Webhook: http://${host}:${port}/webhook`);
+  });
 }

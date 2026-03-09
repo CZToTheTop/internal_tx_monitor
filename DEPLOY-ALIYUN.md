@@ -63,22 +63,18 @@ pm2 save
 pm2 startup
 ```
 
-## 6. Nginx 反向代理 + HTTPS
+## 6. Nginx 反向代理（无域名用 80 端口即可）
 
 ```bash
-# 安装 Nginx
-apt install -y nginx   # 或 yum install -y nginx
-
-# 安装 certbot（Let's Encrypt）
-apt install -y certbot python3-certbot-nginx
+apt install -y nginx
 ```
 
-创建 Nginx 配置 `/etc/nginx/sites-available/monitor`（或 `/etc/nginx/conf.d/monitor.conf`）：
+创建 `/etc/nginx/sites-available/monitor` 或 `/etc/nginx/conf.d/monitor.conf`：
 
 ```nginx
 server {
     listen 80;
-    server_name 你的域名.com;   # 或直接用服务器公网 IP
+    server_name _;
 
     location /webhook {
         proxy_pass http://127.0.0.1:8080;
@@ -97,16 +93,11 @@ server {
 ```
 
 ```bash
-# 启用配置
 ln -s /etc/nginx/sites-available/monitor /etc/nginx/sites-enabled/
-nginx -t
-
-# 若有域名，申请 HTTPS
-certbot --nginx -d 你的域名.com
-
-# 重启 Nginx
-systemctl reload nginx
+nginx -t && systemctl reload nginx
 ```
+
+**无域名时**：Alchemy 先填 `http://你的公网IP/webhook` 测试。若要求 HTTPS，再按下面步骤用 DuckDNS。
 
 ## 7. 防火墙
 
@@ -118,14 +109,37 @@ ufw allow 443
 ufw reload
 ```
 
-## 8. Alchemy 配置
+## 8. 无域名时：用免费子域名 + HTTPS
 
-- **有域名**：Webhook URL 填 `https://你的域名.com/webhook`
-- **无域名**：填 `http://服务器公网IP/webhook`（Alchemy 通常要求 HTTPS，建议用域名 + certbot）
+Alchemy 通常要求 HTTPS。无域名时可用 **DuckDNS** 免费子域名：
 
-> 若服务器在**国内地域**且 Alchemy 仍无法访问，可考虑将实例迁至**香港/新加坡**地域。
+```bash
+# 1. 注册 https://www.duckdns.org/，创建子域名如 alchemy-monitor.duckdns.org，指向你的服务器公网 IP
 
-## 9. 验证
+# 2. 安装 certbot 的 DuckDNS 插件
+apt install -y certbot
+pip3 install certbot-dns-duckdns
+
+# 3. 在 DuckDNS 页面获取 Token，创建配置
+mkdir -p /etc/letsencrypt
+echo "dns_duckdns_token=你的Token" > /etc/letsencrypt/duckdns.ini
+chmod 600 /etc/letsencrypt/duckdns.ini
+
+# 4. 申请证书（替换为你的子域名）
+certbot certonly --dns-duckdns -d alchemy-monitor.duckdns.org \
+  --dns-duckdns-credentials /etc/letsencrypt/duckdns.ini
+```
+
+然后修改 Nginx 配置，启用 443 并指向证书路径 `/etc/letsencrypt/live/alchemy-monitor.duckdns.org/`。
+
+**或先试 HTTP**：部分场景 Alchemy 可能接受 `http://公网IP:80/webhook`，可在 Dashboard 先填该地址测试。
+
+## 9. Alchemy 配置
+
+- **有域名/子域名**：`https://你的域名/webhook`
+- **仅 IP**：`http://公网IP/webhook`（若 Alchemy 报错需 HTTPS，再用 DuckDNS）
+
+## 10. 验证
 
 ```bash
 # 本地测试

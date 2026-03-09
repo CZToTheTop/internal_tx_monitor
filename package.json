@@ -12,6 +12,7 @@
     "monitor": "tsx src/index.ts",
     "test:tx": "tsx src/test-tx.ts",
     "test:webhook": "bash scripts/test-webhook.sh",
+    "test:webhook:local": "tsx scripts/test-webhook-signed.ts",
     "poll": "tsx src/poll.ts",
     "setup:guide": "tsx scripts/setup-webhook-guide.ts"
   },
