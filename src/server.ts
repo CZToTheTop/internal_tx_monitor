@@ -58,6 +58,7 @@ export function createServer(options: ServerOptions): express.Express {
       }
 
       const event = req.body as AlchemyWebhookEvent;
+      console.log(`[webhook] 收到请求 id=${event.id} type=${event.type}`);
       await onEvent(event);
       res.status(200).send("OK");
     } catch (err) {

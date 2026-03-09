@@ -1,7 +1,22 @@
 import type { AlchemyWebhookEvent } from "./webhook-util.js";
 
-function formatEvent(_event: AlchemyWebhookEvent): void {
-  // 静默处理，可在此接入自定义逻辑（数据库、告警等）
+function formatEvent(event: AlchemyWebhookEvent): void {
+  const { id, webhookId, type, event: ev } = event;
+  const block = ev?.data?.block;
+  const logs = ev?.data?.logs?.length ?? 0;
+  const txs = ev?.data?.transactions?.length ?? 0;
+  const traces = ev?.data?.callTracerTraces?.length ?? 0;
+
+  console.log(
+    `[webhook] id=${id} webhookId=${webhookId} type=${type} ` +
+      `block=${block?.number ?? "-"} logs=${logs} txs=${txs} traces=${traces}`
+  );
+  if (block?.hash) console.log(`[webhook] blockHash=${block.hash}`);
+  const truncate = (s: string, max = 500) =>
+    s.length > max ? s.slice(0, max) + "..." : s;
+  if (logs > 0) console.log("[webhook] logs:", truncate(JSON.stringify(ev?.data?.logs)));
+  if (txs > 0) console.log("[webhook] txs:", truncate(JSON.stringify(ev?.data?.transactions)));
+  if (traces > 0) console.log("[webhook] traces:", truncate(JSON.stringify(ev?.data?.callTracerTraces)));
 }
 
 /**

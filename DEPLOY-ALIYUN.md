@@ -125,12 +125,65 @@ mkdir -p /etc/letsencrypt
 echo "dns_duckdns_token=你的Token" > /etc/letsencrypt/duckdns.ini
 chmod 600 /etc/letsencrypt/duckdns.ini
 
-# 4. 申请证书（替换为你的子域名）
-certbot certonly --dns-duckdns -d alchemy-monitor.duckdns.org \
-  --dns-duckdns-credentials /etc/letsencrypt/duckdns.ini
+# 4. 申请证书（替换为你的子域名和邮箱）
+certbot certonly \
+  --non-interactive \
+  --agree-tos \
+  --email your@email.com \
+  --preferred-challenges dns \
+  --authenticator dns-duckdns \
+  --dns-duckdns-credentials /etc/letsencrypt/duckdns.ini \
+  --dns-duckdns-propagation-seconds 60 \
+  -d "alchemy-monitor.duckdns.org"
 ```
 
-然后修改 Nginx 配置，启用 443 并指向证书路径 `/etc/letsencrypt/live/alchemy-monitor.duckdns.org/`。
+### 5. 修改 Nginx 配置，启用 HTTPS
+
+编辑 `/etc/nginx/sites-available/monitor` 或 `/etc/nginx/conf.d/monitor.conf`，替换为以下内容（将 `alchemy-monitor.duckdns.org` 换成你的子域名）：
+
+```nginx
+server {
+    listen 80;
+    server_name alchemy-monitor.duckdns.org;
+    # HTTP 自动跳转到 HTTPS
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name alchemy-monitor.duckdns.org;
+
+    # Let's Encrypt 证书路径
+    ssl_certificate /etc/letsencrypt/live/alchemy-monitor.duckdns.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/alchemy-monitor.duckdns.org/privkey.pem;
+
+    # 可选：SSL 安全配置
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+
+    location /webhook {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 10M;
+    }
+
+    location /health {
+        proxy_pass http://127.0.0.1:8080;
+    }
+}
+```
+
+执行以下命令检查并重载 Nginx：
+
+```bash
+nginx -t && systemctl reload nginx
+```
+
+**Alchemy Webhook URL**：`https://alchemy-monitor.duckdns.org/webhook`
 
 **或先试 HTTP**：部分场景 Alchemy 可能接受 `http://公网IP:80/webhook`，可在 Dashboard 先填该地址测试。
 
