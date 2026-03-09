@@ -37,6 +37,8 @@ export function createServer(options: ServerOptions): express.Express {
   );
 
   app.post(WEBHOOK_PATH, async (req: Request, res: Response) => {
+    const event = req.body as AlchemyWebhookEvent;
+    console.log(`[webhook] 收到请求 id=${event?.id ?? "-"} type=${event?.type ?? "-"}`);
     try {
       const signature = req.headers["x-alchemy-signature"] as string | undefined;
       const skipValidation = process.env.SKIP_SIGNATURE_VALIDATION === "true";
@@ -57,8 +59,6 @@ export function createServer(options: ServerOptions): express.Express {
         return;
       }
 
-      const event = req.body as AlchemyWebhookEvent;
-      console.log(`[webhook] 收到请求 id=${event.id} type=${event.type}`);
       await onEvent(event);
       res.status(200).send("OK");
     } catch (err) {

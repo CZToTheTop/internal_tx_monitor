@@ -17,6 +17,8 @@ export interface MonitorTarget {
   fromAddresses?: string[];
   /** 仅 internal_calls: 过滤 to 地址，空表示任意 */
   toAddresses?: string[];
+  /** 仅 internal_calls: 按 method selector 过滤（input 前 4 字节），如 transfer 为 0xa9059cbb */
+  methodSelectors?: string[];
   /** 仅 transactions: 过滤 from 地址 */
   txFrom?: string[];
   /** 仅 transactions: 过滤 to 地址 */

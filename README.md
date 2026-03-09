@@ -90,11 +90,37 @@ targets:
 - 合约创建 `create`
 - 调用链中的 `from`、`to`、`value`、`input`、`output`、`gasUsed` 等
 
+**按 method 过滤**：Alchemy 仅支持按 from/to 过滤，不支持按 method。可在 `config.yaml` 中加 `methodSelectors`，handler 会只处理匹配的 internal call：
+
+```yaml
+- type: internal_calls
+  label: "Transfer calls to USDC"
+  addresses: ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"]
+  toAddresses: ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"]
+  methodSelectors: ["0xa9059cbb"]  # transfer(address,uint256)
+```
+
+常见 selector：`transfer`=0xa9059cbb、`approve`=0x095ea7b3、`swap`=0x38ed1739（视合约而定）。
+
 注意：部分链可能尚未支持 callTracerTraces，请查阅 [Alchemy 文档](https://docs.alchemy.com/reference/custom-webhook-filters#internal-transaction-debug-trace-calls-filters-beta)。
+
+## Telegram 通知
+
+在 `.env` 中配置后，监控到事件会自动推送到 Telegram：
+
+```
+TELEGRAM_BOT_TOKEN=你的Bot Token
+TELEGRAM_CHAT_ID=你的Chat ID
+```
+
+**获取方式**：
+1. 找 [@BotFather](https://t.me/BotFather) 创建 Bot，获取 `TELEGRAM_BOT_TOKEN`
+2. 发一条消息给你的 Bot，然后访问 `https://api.telegram.org/bot<token>/getUpdates` 查看返回中的 `chat.id`，即为 `TELEGRAM_CHAT_ID`
+3. 群组通知：将 Bot 拉入群，`chat_id` 通常为负数（如 `-1001234567890`）
 
 ## 自定义事件处理
 
-默认将事件格式化输出到控制台。可在 `src/index.ts` 中替换 `onEvent` 回调：
+默认将事件格式化输出到控制台，并可选推送到 Telegram。可在 `src/index.ts` 中替换 `onEvent` 回调：
 
 ```ts
 import { createServer, startServer } from "./server.js";
