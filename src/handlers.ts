@@ -38,6 +38,15 @@ function formatEvent(event: AlchemyWebhookEvent, traces?: unknown[]): void {
   if (traceCount > 0) console.log("[webhook] traces:", truncate(JSON.stringify(traces ?? block?.callTracerTraces)));
 }
 
+/** 转义 HTML 特殊字符，防止注入 */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 /** 构建 TG 通知文本 */
 function buildTelegramMessage(
   event: AlchemyWebhookEvent,
@@ -48,28 +57,36 @@ function buildTelegramMessage(
   tracesData?: unknown[]
 ): string {
   const block = event?.event?.data?.block;
-  const blockNum = block?.number ?? "-";
-  const blockHash = block?.hash ?? "";
+  const blockNum = String(block?.number ?? "-");
+  const blockHash = (block?.hash ?? "").replace(/[^a-fA-F0-9x]/g, "");
   const base = getExplorerBase(network);
   const blockUrl = blockHash ? `${base}/block/${blockHash}` : `${base}/block/${blockNum}`;
 
   const parts: string[] = [
     `🔔 <b>链上监控</b>`,
-    `网络: ${network}`,
-    `区块: <a href="${blockUrl}">#${blockNum}</a>`,
+    `网络: ${escapeHtml(network)}`,
+    `区块: <a href="${blockUrl}">#${escapeHtml(blockNum)}</a>`,
     `logs: ${logs} | txs: ${txs} | traces: ${traces}`,
   ];
 
   const tx = block?.transactions?.[0] as { hash?: string } | undefined;
-  if (tx?.hash) parts.push(`交易: <a href="${base}/tx/${tx.hash}">${tx.hash.slice(0, 18)}...</a>`);
+  if (tx?.hash) {
+    const h = (tx.hash ?? "").replace(/[^a-fA-F0-9x]/g, "");
+    if (h) parts.push(`交易: <a href="${base}/tx/${h}">${escapeHtml(h.slice(0, 18))}...</a>`);
+  }
 
   const log = block?.logs?.[0] as { transaction?: { hash?: string } } | undefined;
-  if (log?.transaction?.hash) parts.push(`Log: <a href="${base}/tx/${log.transaction.hash}">查看</a>`);
+  if (log?.transaction?.hash) {
+    const h = (log.transaction.hash ?? "").replace(/[^a-fA-F0-9x]/g, "");
+    if (h) parts.push(`Log: <a href="${base}/tx/${h}">查看</a>`);
+  }
 
   const tr = tracesData?.[0] as { from?: { address?: string }; to?: { address?: string }; input?: string } | undefined;
   if (tr) {
-    parts.push(`内部调用: ${tr.from?.address?.slice(0, 10)}... → ${tr.to?.address?.slice(0, 10)}...`);
-    if (tr.input) parts.push(`input: ${tr.input.slice(0, 20)}...`);
+    const fromAddr = (tr.from?.address ?? "").slice(0, 10);
+    const toAddr = (tr.to?.address ?? "").slice(0, 10);
+    parts.push(`内部调用: ${escapeHtml(fromAddr)}... → ${escapeHtml(toAddr)}...`);
+    if (tr.input) parts.push(`input: ${escapeHtml(tr.input.slice(0, 20))}...`);
   }
 
   return parts.join("\n");

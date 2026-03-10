@@ -76,9 +76,14 @@ export function buildTransactionsQuery(target: MonitorTarget): string {
  * 构建 Internal Calls 监控的 GraphQL 查询
  * 使用 callTracerTraces 捕获内部调用 (call/delegatecall/create)
  */
+function ensureAddressArray(v: unknown): string[] {
+  if (Array.isArray(v)) return v.filter((x) => typeof x === "string");
+  return [];
+}
+
 export function buildInternalCallsQuery(target: MonitorTarget): string {
-  const fromList = target.fromAddresses ?? [];
-  const toList = target.toAddresses ?? target.addresses;
+  const fromList = ensureAddressArray(target.fromAddresses);
+  const toList = ensureAddressArray(target.toAddresses ?? target.addresses);
   const fromStr = fromList.length ? `from: [${fromList.map((a) => `"${a}"`).join(", ")}]` : "";
   const toStr = toList.length ? `to: [${toList.map((a) => `"${a}"`).join(", ")}]` : "";
   const filterParts = [fromStr, toStr].filter(Boolean).join(", ");

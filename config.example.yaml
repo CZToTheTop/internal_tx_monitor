@@ -4,8 +4,8 @@
 # 网络: eth_mainnet, eth_sepolia, polygon_mainnet, arbitrum_mainnet, optimism_mainnet, base_mainnet 等
 network: eth_mainnet
 
-# Webhook 接收地址，需公网可访问 (本地开发可用 ngrok: ngrok http 8080)
-webhookUrl: https://your-ngrok-url.ngrok.io/webhook
+# Webhook 接收地址，需公网可访问 (隧道如 cloudflared，或部署后的服务器 URL)
+webhookUrl: https://your-server.com/webhook
 
 targets:
   # 1. 监控合约事件 (logs)

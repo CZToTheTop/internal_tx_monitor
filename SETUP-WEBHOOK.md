@@ -48,7 +48,7 @@ SIGNING_KEYS=whsec_你的key
 ## 6. 测试
 
 - 在 Alchemy 点击 **Test Webhook**
-- 或运行 `npm run test:webhook`
+- 本地带签名测试：`npm run test:webhook:local`（需 monitor 已启动）
 
 ## 监控内部调用
 

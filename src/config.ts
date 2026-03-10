@@ -53,8 +53,13 @@ const NETWORK_MAP: Record<string, string> = {
 };
 
 export function loadConfig(path?: string): Config {
-  const configPath = path ?? resolve(process.cwd(), "config.yaml");
-  const raw = readFileSync(configPath, "utf-8");
+  const base = process.cwd();
+  const configPath = path ? resolve(base, path) : resolve(base, "config.yaml");
+  const realPath = resolve(configPath);
+  if (!realPath.startsWith(base)) {
+    throw new Error("CONFIG_PATH 不能指向项目目录外");
+  }
+  const raw = readFileSync(realPath, "utf-8");
   const parsed = parse(raw) as Config;
   if (!parsed.network || !parsed.targets?.length) {
     throw new Error("config.yaml 必须包含 network, targets");

@@ -36,6 +36,10 @@ export function createServer(options: ServerOptions): express.Express {
     })
   );
 
+  if (process.env.SKIP_SIGNATURE_VALIDATION === "true") {
+    console.warn("[security] ⚠️ SKIP_SIGNATURE_VALIDATION=true — 生产环境请勿使用");
+  }
+
   app.post(WEBHOOK_PATH, async (req: Request, res: Response) => {
     const event = req.body as AlchemyWebhookEvent;
     console.log(`[webhook] 收到请求 id=${event?.id ?? "-"} type=${event?.type ?? "-"}`);

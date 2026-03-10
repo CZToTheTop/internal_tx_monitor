@@ -1,212 +1,213 @@
-# Alchemy 链上监控
+# Alchemy 链上监控 / Chain Monitor
 
-基于 [Alchemy Notify API](https://docs.alchemy.com/docs/alchemy-notify) 的链上事件与**内部调用**监控项目。支持：
+基于 [Alchemy Notify API](https://docs.alchemy.com/docs/alchemy-notify) 的链上事件与**内部调用**监控。支持 Events、Transactions、Internal Calls，可选 Telegram 通知。
+
+Monitors on-chain events and internal calls via Alchemy webhooks. Supports Events, Transactions, Internal Calls, with optional Telegram notifications.
+
+---
+
+## 中文
+
+### 功能
 
 - **Events**：监控指定合约发出的事件（logs）
 - **Transactions**：监控发往/来自指定地址的外部交易
-- **Internal Calls**：监控内部调用（`call` / `delegatecall` / `create`），使用 Alchemy Custom Webhook 的 `callTracerTraces` 过滤器
+- **Internal Calls**：监控内部调用（`call` / `delegatecall` / `create`），含 `input` / `output` 等
+- **Telegram**：可选推送到 TG
 
-## 前置要求
+### 前置要求
 
 1. [Alchemy](https://www.alchemy.com/) 账号
-2. **本地 Webhook 服务 + 隧道**：必须先启动 `npm run monitor` 和隧道（如 cloudflared），Alchemy 才能成功配置并投递 Webhook
-3. **Auth Token**：需先在 Dashboard 手动创建至少一个 Webhook 后，才能在 Webhooks 页面看到 AUTH TOKEN 按钮
+2. 公网可访问的 Webhook 地址（隧道或部署到服务器）
+3. Auth Token：需先在 Dashboard 手动创建至少一个 Webhook 后，Webhooks 页面才会出现 AUTH TOKEN
 
 ### ⚠️ ngrok 免费版不适用于 Webhook
 
-ngrok 免费版会对请求显示「Visit Site」插页，Alchemy 的 webhook 请求会被拦截，无法到达你的服务。建议使用以下替代方案：
+ngrok 免费版会显示插页，Alchemy 请求无法到达。建议：**Cloudflare Tunnel**、**localtunnel** 或部署到云服务器。
 
-| 方案 | 命令 | 说明 |
-|------|------|------|
-| **Cloudflare Tunnel** | `cloudflared tunnel --url http://localhost:8080` | 免费，无插页 |
-| **localtunnel** | `npx localtunnel --port 8080` | 免费，`npx` 即可用 |
-| **ngrok 付费版** | `ngrok http 8080` | 自定义域名无插页 |
-
-## 快速开始
-
-**正确顺序**：先启动本地 Webhook 服务 + 隧道，再在 Alchemy 配置；否则 Alchemy 无法验证你的接收地址。
+### 快速开始
 
 ```bash
-# 1. 安装依赖
 npm install
 cp config.example.yaml config.yaml
 cp .env.example .env
 
-# 2. 先启动本地 Webhook 服务（必须最先运行）
+# 1. 启动服务
 npm run monitor
 
-# 3. 另开终端，启动隧道
+# 2. 另开终端启动隧道（本地开发）
 cloudflared tunnel --url http://localhost:8080
-# 将输出的 https://xxx.trycloudflare.com 加上 /webhook 填入 config.yaml 的 webhookUrl
+# 将输出的 https://xxx.trycloudflare.com/webhook 填入 config.yaml
 
-# 4. 本地服务 + 隧道就绪后，才能在 Alchemy Dashboard 创建 Webhook
-#    Data → Webhooks → Create Webhook → 选择 Custom → 填入 webhookUrl、GraphQL 等
-#    创建成功后，在 Webhooks 页面右上角点击 AUTH TOKEN，复制到 .env 的 ALCHEMY_AUTH_TOKEN
-
-# 5. 之后可用 API 批量创建（可选）
+# 3. 创建 Webhook
 npm run setup
-
-# 6. 将 setup 输出的 SIGNING_KEYS 填入 .env
+# 将输出的 SIGNING_KEYS 填入 .env
 ```
 
-## 配置说明
-
-### config.yaml
+### 配置 (config.yaml)
 
 ```yaml
-network: eth_mainnet          # 网络
-webhookUrl: https://xxx.ngrok.io/webhook   # 接收地址
+network: BNB_MAINNET   # 或 eth_mainnet, polygon_mainnet 等
+webhookUrl: https://your-server.com/webhook
 
 targets:
-  # 监控合约事件
   - type: events
     label: "USDC Transfer"
     addresses: ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"]
     topics: ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]
 
-  # 监控外部交易
-  - type: transactions
-    label: "Calls to Vault"
-    addresses: ["0x388C818CA8B9251b393131C08a736A67ccB19297"]
-    txTo: ["0x388C818CA8B9251b393131C08a736A67ccB19297"]
-
-  # 监控内部调用（含合约 A 调用合约 B）
   - type: internal_calls
-    label: "Internal calls to Router"
-    addresses: ["0x5c43B1eD97e52d009611D89b74fA829FE4ac56b1"]
-    toAddresses: ["0x5c43B1eD97e52d009611D89b74fA829FE4ac56b1"]
-    # fromAddresses: []   # 空表示任意 from
+    label: "Transfer to USDT"
+    addresses: ["0x55d398326f99059fF775485246999027B3197955"]
+    toAddresses: ["0x55d398326f99059fF775485246999027B3197955"]
+    methodSelectors: ["0xa9059cbb"]   # transfer(address,uint256)
 ```
 
-### 支持的网络
+### Telegram 通知
 
-`eth_mainnet`, `eth_sepolia`, `polygon_mainnet`, `arbitrum_mainnet`, `optimism_mainnet`, `base_mainnet` 等。
-
-### Internal Calls 说明
-
-`internal_calls` 使用 Alchemy Custom Webhook 的 **callTracerTraces**（BETA），可捕获：
-
-- 合约 A 调用合约 B 的 `call` / `delegatecall`
-- 合约创建 `create`
-- 调用链中的 `from`、`to`、`value`、`input`、`output`、`gasUsed` 等
-
-**按 method 过滤**：Alchemy 仅支持按 from/to 过滤，不支持按 method。可在 `config.yaml` 中加 `methodSelectors`，handler 会只处理匹配的 internal call：
-
-```yaml
-- type: internal_calls
-  label: "Transfer calls to USDC"
-  addresses: ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"]
-  toAddresses: ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"]
-  methodSelectors: ["0xa9059cbb"]  # transfer(address,uint256)
-```
-
-常见 selector：`transfer`=0xa9059cbb、`approve`=0x095ea7b3、`swap`=0x38ed1739（视合约而定）。
-
-注意：部分链可能尚未支持 callTracerTraces，请查阅 [Alchemy 文档](https://docs.alchemy.com/reference/custom-webhook-filters#internal-transaction-debug-trace-calls-filters-beta)。
-
-## Telegram 通知
-
-在 `.env` 中配置后，监控到事件会自动推送到 Telegram：
+在 `.env` 中配置：
 
 ```
 TELEGRAM_BOT_TOKEN=你的Bot Token
 TELEGRAM_CHAT_ID=你的Chat ID
 ```
 
-**获取方式**：
-1. 找 [@BotFather](https://t.me/BotFather) 创建 Bot，获取 `TELEGRAM_BOT_TOKEN`
-2. 发一条消息给你的 Bot，然后访问 `https://api.telegram.org/bot<token>/getUpdates` 查看返回中的 `chat.id`，即为 `TELEGRAM_CHAT_ID`
-3. 群组通知：将 Bot 拉入群，`chat_id` 通常为负数（如 `-1001234567890`）
+获取方式：[@BotFather](https://t.me/BotFather) 创建 Bot；发消息给 Bot 后访问 `https://api.telegram.org/bot<token>/getUpdates` 查看 `chat.id`。
 
-## 自定义事件处理
-
-默认将事件格式化输出到控制台，并可选推送到 Telegram。可在 `src/index.ts` 中替换 `onEvent` 回调：
-
-```ts
-import { createServer, startServer } from "./server.js";
-
-const app = createServer({
-  port: PORT,
-  host: HOST,
-  signingKeys,
-  onEvent: async (event) => {
-    // 写入数据库、发送告警、推送到消息队列等
-    await yourHandler(event);
-  },
-});
-```
-
-## 轮询模式（无需 Webhook）
-
-无需隧道、公网地址或 Alchemy Webhook，直接通过 RPC 轮询 `eth_getLogs`：
-
-```bash
-npm run poll
-```
-
-支持环境变量：`RPC_URL`、`BSC_RPC_URL`、`POLL_INTERVAL`（默认 12 秒）
-
-## 脚本
+### 常用命令
 
 | 命令 | 说明 |
 |------|------|
+| `npm run monitor` | 启动 Webhook 服务 |
+| `npm run setup` | 根据 config 创建 Alchemy Webhooks |
+| `npm run setup:guide` | 输出手动创建 Webhook 的 GraphQL |
 | `npm run poll` | 轮询模式，无需 webhook |
-| `npm run setup` | 根据 config.yaml 创建 Alchemy Webhooks |
-| `npm run monitor` | 启动 Webhook 接收服务 |
-| `npm run dev` | 开发模式（热重载） |
+| `npm run test:webhook:local` | 本地带签名测试 |
+| `npm run test:tx` | 解析指定交易的 Transfer 参数 |
 
-## 项目结构
+### 部署
+
+- **阿里云**：见 [DEPLOY-ALIYUN.md](DEPLOY-ALIYUN.md)
+- **Railway / Render**：见 [DEPLOY.md](DEPLOY.md)
+
+---
+
+## English
+
+### Features
+
+- **Events**: Monitor contract logs (e.g. ERC20 Transfer)
+- **Transactions**: Monitor external transactions to/from addresses
+- **Internal Calls**: Monitor `call` / `delegatecall` / `create` with `input` / `output`
+- **Telegram**: Optional push notifications
+
+### Requirements
+
+1. [Alchemy](https://www.alchemy.com/) account
+2. Publicly accessible webhook URL (tunnel or deployed server)
+3. Auth Token: Create at least one webhook in Dashboard first, then AUTH TOKEN appears
+
+### Quick Start
+
+```bash
+npm install
+cp config.example.yaml config.yaml
+cp .env.example .env
+
+# 1. Start server
+npm run monitor
+
+# 2. Start tunnel (local dev)
+cloudflared tunnel --url http://localhost:8080
+# Put https://xxx.trycloudflare.com/webhook into config.yaml
+
+# 3. Create webhooks
+npm run setup
+# Add SIGNING_KEYS to .env
+```
+
+### Config (config.yaml)
+
+```yaml
+network: BNB_MAINNET   # or eth_mainnet, polygon_mainnet, etc.
+webhookUrl: https://your-server.com/webhook
+
+targets:
+  - type: events
+    label: "USDC Transfer"
+    addresses: ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"]
+    topics: ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]
+
+  - type: internal_calls
+    label: "Transfer to USDT"
+    addresses: ["0x55d398326f99059fF775485246999027B3197955"]
+    toAddresses: ["0x55d398326f99059fF775485246999027B3197955"]
+    methodSelectors: ["0xa9059cbb"]   # transfer(address,uint256)
+```
+
+### Telegram Notifications
+
+Add to `.env`:
+
+```
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_CHAT_ID=your_chat_id
+```
+
+Create bot via [@BotFather](https://t.me/BotFather); get chat_id from `https://api.telegram.org/bot<token>/getUpdates` after messaging the bot.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `npm run monitor` | Start webhook server |
+| `npm run setup` | Create Alchemy webhooks from config |
+| `npm run setup:guide` | Print GraphQL for manual webhook creation |
+| `npm run poll` | Polling mode (no webhook) |
+| `npm run test:webhook:local` | Local signed webhook test |
+
+### Deployment
+
+- **Aliyun**: See [DEPLOY-ALIYUN.md](DEPLOY-ALIYUN.md)
+- **Railway / Render**: See [DEPLOY.md](DEPLOY.md)
+
+---
+
+## Project Structure
 
 ```
 monitor/
-├── config.yaml          # 监控配置（需自行创建）
-├── config.example.yaml  # 配置示例
+├── config.yaml          # Your config (gitignored)
+├── config.example.yaml  # Config template
 ├── src/
-│   ├── index.ts         # 入口
-│   ├── setup.ts         # Webhook 创建脚本
-│   ├── config.ts        # 配置加载
-│   ├── graphql.ts       # GraphQL 查询构建
+│   ├── index.ts         # Entry
+│   ├── server.ts        # Webhook server
+│   ├── handlers.ts      # Event handler + Telegram
+│   ├── telegram.ts      # Telegram API
+│   ├── config.ts        # Config loader
+│   ├── graphql.ts       # GraphQL query builder
 │   ├── alchemy-api.ts   # Alchemy Notify API
-│   ├── server.ts        # Webhook 服务器
-│   ├── webhook-util.ts  # 签名验证
-│   └── handlers.ts      # 默认事件处理
-└── package.json
+│   ├── webhook-util.ts  # Signature validation
+│   ├── setup.ts         # Webhook creation
+│   ├── poll.ts          # Polling mode
+│   ├── transfer-parser.ts
+│   └── test-tx.ts
+├── scripts/
+│   ├── test-webhook-signed.ts
+│   ├── test-webhook.sh
+│   └── setup-webhook-guide.ts
+├── DEPLOY-ALIYUN.md
+├── DEPLOY.md
+└── SETUP-WEBHOOK.md
 ```
 
-## 故障排查
+## Troubleshooting
 
-**Webhook 投递失败？** 若使用 ngrok 免费版，Alchemy 请求会被 ngrok 插页拦截。请改用 Cloudflare Tunnel 或 localtunnel：
+- **401 Invalid signature**: Add correct `SIGNING_KEYS` to `.env` and restart. For testing, use `SKIP_SIGNATURE_VALIDATION=true`.
+- **Alchemy cannot reach webhook**: Deploy to a public server (Aliyun, Railway, etc.) instead of local tunnel.
+- **fromList.map is not a function**: Fix YAML format — use `- "0x..."` (space after `-`), not `-["0x..."]`.
 
-```bash
-# 方案 A: Cloudflare Tunnel（需先安装 cloudflared）
-cloudflared tunnel --url http://localhost:8080
-
-# 方案 B: localtunnel（无需安装）
-npx localtunnel --port 8080
-```
-
-将输出的 URL（如 `https://xxx.loca.lt`）加上 `/webhook` 填入 config.yaml 的 webhookUrl。
-
-**Alchemy 测试显示 Internal Server Error？**
-1. 若尚未配置 `SIGNING_KEYS`，在 `.env` 中临时添加 `SKIP_SIGNATURE_VALIDATION=true` 后重启服务
-2. 查看终端日志，确认是否有 `[Webhook] Handler error` 或 `Invalid signature` 等报错
-3. 确认隧道和本地服务均在运行，且 webhookUrl 包含 `/webhook` 路径
-
-## Webhook 配置清单
-
-按 [Alchemy Notify API Quickstart](https://www.alchemy.com/docs/reference/notify-api-quickstart) 要求，需满足：
-
-| 项 | 说明 | 本项目 |
-|----|------|--------|
-| **Webhook URL** | 公网可访问的 HTTPS 地址，路径为 `/webhook` | `config.yaml` → `webhookUrl` |
-| **200 响应** | 成功接收后必须返回 200 | ✅ 已实现 |
-| **签名验证** | 校验 `X-Alchemy-Signature`（HMAC SHA-256） | ✅ 已实现，需 `SIGNING_KEYS` |
-| **Signing Key** | 每个 webhook 的签名密钥 | Dashboard → Webhook 详情页 或 `npm run setup` 输出 |
-| **Auth Token** | 用于 create-webhook 等 API | 需先手动创建至少一个 Webhook 后，Dashboard → Webhooks 右上角出现 |
-| **IP 白名单**（可选） | 仅接受来自 Alchemy 的请求 | `54.236.136.17`、`34.237.24.169`（可在防火墙/Nginx 中配置） |
-
-## 参考
+## References
 
 - [Alchemy Notify API Quickstart](https://www.alchemy.com/docs/reference/notify-api-quickstart)
-- [Alchemy Custom Webhooks](https://docs.alchemy.com/reference/custom-webhook)
-- [Custom Webhook Filters (含 callTracerTraces)](https://docs.alchemy.com/reference/custom-webhook-filters)
+- [Custom Webhook Filters (callTracerTraces)](https://docs.alchemy.com/reference/custom-webhook-filters)
