@@ -3,8 +3,10 @@ import type { AlchemyWebhookEvent } from "./webhook-util.js";
 import { sendTelegram, getExplorerBase } from "./telegram.js";
 
 /** 规范化 method selector 为 0x + 8 位小写 hex */
-function normSelector(s: string): string {
-  const h = s.replace(/^0x/i, "").toLowerCase().slice(0, 8);
+function normSelector(s: unknown): string | null {
+  const str = Array.isArray(s) ? s[0] : s;
+  if (typeof str !== "string") return null;
+  const h = str.replace(/^0x/i, "").toLowerCase().slice(0, 8);
   return "0x" + h.padEnd(8, "0");
 }
 
@@ -13,7 +15,10 @@ function getMethodSelectors(config: Config): string[] {
   const set = new Set<string>();
   for (const t of config.targets) {
     if (t.type === "internal_calls" && t.methodSelectors?.length) {
-      for (const s of t.methodSelectors) set.add(normSelector(s));
+      for (const s of t.methodSelectors) {
+        const n = normSelector(s);
+        if (n) set.add(n);
+      }
     }
   }
   return [...set];
