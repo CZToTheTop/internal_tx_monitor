@@ -52,48 +52,35 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/** 构建 TG 通知文本 */
-function buildTelegramMessage(
-  event: AlchemyWebhookEvent,
-  logs: number,
-  txs: number,
-  traces: number,
-  network: string,
-  tracesData?: unknown[]
-): string {
+/** 从 event 中取第一个交易 hash（transactions[0]、logs[0].transaction 或 traces 的 transaction） */
+function getTxHash(event: AlchemyWebhookEvent): string | null {
   const block = event?.event?.data?.block;
-  const blockNum = String(block?.number ?? "-");
-  const blockHash = (block?.hash ?? "").replace(/[^a-fA-F0-9x]/g, "");
-  const base = getExplorerBase(network);
-  const blockUrl = blockHash ? `${base}/block/${blockHash}` : `${base}/block/${blockNum}`;
-
-  const parts: string[] = [
-    `🔔 <b>链上监控</b>`,
-    `网络: ${escapeHtml(network)}`,
-    `区块: <a href="${blockUrl}">#${escapeHtml(blockNum)}</a>`,
-    `logs: ${logs} | txs: ${txs} | traces: ${traces}`,
-  ];
-
   const tx = block?.transactions?.[0] as { hash?: string } | undefined;
-  if (tx?.hash) {
-    const h = (tx.hash ?? "").replace(/[^a-fA-F0-9x]/g, "");
-    if (h) parts.push(`交易: <a href="${base}/tx/${h}">${escapeHtml(h.slice(0, 18))}...</a>`);
-  }
-
+  if (tx?.hash) return (tx.hash ?? "").replace(/[^a-fA-F0-9x]/g, "") || null;
   const log = block?.logs?.[0] as { transaction?: { hash?: string } } | undefined;
-  if (log?.transaction?.hash) {
-    const h = (log.transaction.hash ?? "").replace(/[^a-fA-F0-9x]/g, "");
-    if (h) parts.push(`Log: <a href="${base}/tx/${h}">查看</a>`);
-  }
+  if (log?.transaction?.hash) return (log.transaction.hash ?? "").replace(/[^a-fA-F0-9x]/g, "") || null;
+  const tr = block?.callTracerTraces?.[0] as { transaction?: { hash?: string }; transactionHash?: string } | undefined;
+  if (tr?.transaction?.hash) return (tr.transaction.hash ?? "").replace(/[^a-fA-F0-9x]/g, "") || null;
+  if (tr?.transactionHash) return (tr.transactionHash ?? "").replace(/[^a-fA-F0-9x]/g, "") || null;
+  return null;
+}
 
-  const tr = tracesData?.[0] as { from?: { address?: string }; to?: { address?: string }; input?: string } | undefined;
-  if (tr) {
-    const fromAddr = (tr.from?.address ?? "").slice(0, 10);
-    const toAddr = (tr.to?.address ?? "").slice(0, 10);
-    parts.push(`内部调用: ${escapeHtml(fromAddr)}... → ${escapeHtml(toAddr)}...`);
-    if (tr.input) parts.push(`input: ${escapeHtml(tr.input.slice(0, 20))}...`);
+/** 构建 TG 通知：1. network  2. txn hash（含 explorer 链接）  3. 监控名（label） */
+function buildTelegramMessage(
+  network: string,
+  txHash: string | null,
+  label: string
+): string {
+  const base = getExplorerBase(network);
+  const parts: string[] = [
+    `🔔 <b>${escapeHtml(label)}</b>`,
+    `网络: ${escapeHtml(network)}`,
+  ];
+  if (txHash) {
+    parts.push(`交易: <a href="${base}/tx/${txHash}">${escapeHtml(txHash.slice(0, 10))}...${txHash.slice(-8)}</a>`);
+  } else {
+    parts.push("交易: —");
   }
-
   return parts.join("\n");
 }
 
@@ -144,14 +131,9 @@ export function createEventHandler(config: Config): (event: AlchemyWebhookEvent,
     }
 
     if (shouldAlert) {
-      const msg = buildTelegramMessage(
-        event,
-        logs,
-        txs,
-        traceCount,
-        network,
-        traces as unknown[] | undefined
-      );
+      const txHash = getTxHash(event);
+      const label = matchedTarget?.label ?? "链上监控";
+      const msg = buildTelegramMessage(network, txHash, label);
       sendTelegram(msg).catch(() => {});
     }
   };
