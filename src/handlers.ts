@@ -65,17 +65,20 @@ function getTxHash(event: AlchemyWebhookEvent): string | null {
   return null;
 }
 
-/** 构建 TG 通知：1. network  2. txn hash（含 explorer 链接）  3. 监控名（label） */
+/** 构建 TG 通知：使用命中条目的 label、network、txHash 区分是 config 里哪条规则 */
 function buildTelegramMessage(
   network: string,
   txHash: string | null,
-  label: string
+  label: string,
+  kind?: "log" | "tx" | "internal_call"
 ): string {
   const base = getExplorerBase(network);
+  const kindLine = kind ? `类型: ${kind}\n` : "";
   const parts: string[] = [
     `🔔 <b>${escapeHtml(label)}</b>`,
+    kindLine,
     `网络: ${escapeHtml(network)}`,
-  ];
+  ].filter(Boolean);
   if (txHash) {
     parts.push(`交易: <a href="${base}/tx/${txHash}">${escapeHtml(txHash.slice(0, 10))}...${txHash.slice(-8)}</a>`);
   } else {
@@ -93,6 +96,123 @@ function getTargetMethodSelectors(target: { type: string; methodSelectors?: unkn
     if (n) set.add(n);
   }
   return [...set];
+}
+
+function addrEq(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false;
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+function inList(addr: string | undefined, list: string[] | undefined): boolean {
+  if (!addr || !list?.length) return !list?.length; // 空 list 表示“任意”
+  return list.some((x) => addrEq(addr, x));
+}
+
+/** 区分规则：log 对应 config 里哪个 events 条目（地址 + topic 匹配），返回命中的 target，用其 label 报警 */
+function matchLogToTargets(
+  log: { account?: { address?: string }; topics?: string[] },
+  eventTargets: MonitorTarget[]
+): MonitorTarget[] {
+  const logAddr = log.account?.address;
+  const topics = log.topics ?? [];
+  return eventTargets.filter((t) => {
+    if (!inList(logAddr, t.addresses)) return false;
+    if (t.topics?.length && !t.topics.some((top) => topics[0] === top)) return false;
+    return true;
+  });
+}
+
+/** 区分规则：tx 对应 config 里哪个 transactions 条目（from/to 匹配），返回命中的 target，用其 label 报警 */
+function matchTxToTargets(
+  tx: { from?: { address?: string }; to?: { address?: string } },
+  txTargets: MonitorTarget[]
+): MonitorTarget[] {
+  const fromAddr = tx.from?.address;
+  const toAddr = tx.to?.address;
+  return txTargets.filter((t) => {
+    const fromOk = inList(fromAddr, t.txFrom ?? t.addresses);
+    const toOk = inList(toAddr, t.txTo ?? t.addresses);
+    return fromOk && toOk;
+  });
+}
+
+/** 区分规则：internal call（method 命中）对应 config 里哪个 internal_calls 条目（from/to/methodSelectors），返回命中的 target，用其 label 报警 */
+function matchTraceToTargets(
+  trace: { from?: { address?: string }; to?: { address?: string }; input?: string },
+  internalTargets: MonitorTarget[]
+): MonitorTarget[] {
+  const fromAddr = trace.from?.address;
+  const toAddr = trace.to?.address;
+  const input = (trace.input ?? "").toLowerCase();
+  return internalTargets.filter((t) => {
+    const fromOk = inList(fromAddr, t.fromAddresses);
+    const toOk = inList(toAddr, t.toAddresses ?? t.addresses);
+    const selectors = getTargetMethodSelectors(t);
+    const selectorOk = selectors.length === 0 || selectors.some((sel) => input.startsWith(sel));
+    return fromOk && toOk && selectorOk;
+  });
+}
+
+/** 从 log / tx / trace 取交易 hash */
+function getTxHashFromItem(
+  item: { transaction?: { hash?: string }; hash?: string },
+  blockTx0?: { hash?: string }
+): string | null {
+  const h = item.transaction?.hash ?? item.hash ?? blockTx0?.hash;
+  if (!h || typeof h !== "string") return null;
+  const out = (h as string).replace(/[^a-fA-F0-9x]/g, "");
+  return out || null;
+}
+
+/** 单 Webhook 模式：每条 log/tx/trace 与 config 里对应类型条目匹配，命中则用该条目的 label 报警 */
+function alertByTargetMatch(
+  config: Config,
+  block: NonNullable<AlchemyWebhookEvent["event"]["data"]>["block"],
+  getTxHashFallback: () => string | null
+): void {
+  const eventTargets = config.targets.filter((t) => t.type === "events") as MonitorTarget[];
+  const txTargets = config.targets.filter((t) => t.type === "transactions") as MonitorTarget[];
+  const internalTargets = config.targets.filter((t) => t.type === "internal_calls") as MonitorTarget[];
+  const blockTx0 = block?.transactions?.[0] as { hash?: string } | undefined;
+
+  // 有 log 时：看 log 对应 config 里哪个 events 条目，用该条目的 label
+  const logs = block?.logs ?? [];
+  for (const log of logs) {
+    const matched = matchLogToTargets(log as { account?: { address?: string }; topics?: string[] }, eventTargets);
+    const txHash = getTxHashFromItem(log as { transaction?: { hash?: string } }, blockTx0) ?? getTxHashFallback();
+    for (const t of matched) {
+      const label = t.label ?? "链上监控";
+      const network = t.network ?? config.network;
+      sendTelegram(buildTelegramMessage(network, txHash, label, "log")).catch(() => {});
+    }
+  }
+
+  // 有 tx 时：看 tx 对应 config 里哪个 transactions 条目，用该条目的 label
+  const txs = block?.transactions ?? [];
+  for (const tx of txs) {
+    const matched = matchTxToTargets(tx as { from?: { address?: string }; to?: { address?: string } }, txTargets);
+    const txHash = getTxHashFromItem(tx as { hash?: string; transaction?: { hash?: string } }, blockTx0) ?? getTxHashFallback();
+    for (const t of matched) {
+      const label = t.label ?? "链上监控";
+      const network = t.network ?? config.network;
+      sendTelegram(buildTelegramMessage(network, txHash, label, "tx")).catch(() => {});
+    }
+  }
+
+  // method 命中（internal call）时：看 trace 对应 config 里哪个 internal_calls 条目，用该条目的 label
+  const traces = block?.callTracerTraces ?? [];
+  for (const trace of traces) {
+    const matched = matchTraceToTargets(
+      trace as { from?: { address?: string }; to?: { address?: string }; input?: string },
+      internalTargets
+    );
+    const txHash = getTxHashFromItem(trace as { transaction?: { hash?: string }; transactionHash?: string }, blockTx0) ?? getTxHashFallback();
+    for (const t of matched) {
+      const label = t.label ?? "链上监控";
+      const network = t.network ?? config.network;
+      sendTelegram(buildTelegramMessage(network, txHash, label, "internal_call")).catch(() => {});
+    }
+  }
 }
 
 /**
@@ -125,16 +245,16 @@ export function createEventHandler(config: Config): (event: AlchemyWebhookEvent,
       if (matchedTarget.type === "events") shouldAlert = logs > 0;
       else if (matchedTarget.type === "transactions") shouldAlert = txs > 0;
       else shouldAlert = traceCount > 0; // internal_calls
+      if (shouldAlert) {
+        const txHash = getTxHash(event);
+        const label = matchedTarget.label ?? "链上监控";
+        sendTelegram(buildTelegramMessage(network, txHash, label)).catch(() => {});
+      }
     } else {
-      const isInternalCallsPayload = (block?.callTracerTraces?.length ?? 0) > 0;
-      shouldAlert = isInternalCallsPayload ? traceCount > 0 : (logs > 0 || txs > 0);
-    }
-
-    if (shouldAlert) {
-      const txHash = getTxHash(event);
-      const label = matchedTarget?.label ?? "链上监控";
-      const msg = buildTelegramMessage(network, txHash, label);
-      sendTelegram(msg).catch(() => {});
+      // 单 Webhook 模式或仅用 env key 校验：将 payload 与所有 target 做多维匹配，按 target 分别报警
+      if (block && config.targets.length > 0) {
+        alertByTargetMatch(config, block, () => getTxHash(event));
+      }
     }
   };
 }

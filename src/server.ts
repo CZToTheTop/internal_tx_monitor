@@ -57,13 +57,19 @@ export function createServer(options: ServerOptions): express.Express {
       }
 
       const body = req.rawBody?.toString("utf8") ?? JSON.stringify(req.body);
-      const matchedTarget = config ? getTargetForSignature(config, body, signature!) : null;
+      // 单 Webhook 模式：用 config.targets 下的 signing_key（singleWebhookSigningKey）校验，不按 target 区分
+      const validSingle =
+        config?.singleWebhook &&
+        config.singleWebhookSigningKey &&
+        isValidSignature(body, signature!, config.singleWebhookSigningKey);
+      const matchedTarget =
+        !validSingle && config ? getTargetForSignature(config, body, signature!) : null;
       const validEnv = signingKeys.length > 0 && signingKeys.some((k) => isValidSignature(body, signature!, k));
-      if (!matchedTarget && !validEnv) {
+      if (!validSingle && !matchedTarget && !validEnv) {
         res.status(401).send("Invalid signature");
         return;
       }
-      await onEvent(event, matchedTarget ?? undefined);
+      await onEvent(event, validSingle ? undefined : matchedTarget ?? undefined);
       res.status(200).send("OK");
     } catch (err) {
       res.status(500).send("Internal error");

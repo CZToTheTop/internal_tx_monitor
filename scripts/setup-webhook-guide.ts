@@ -5,7 +5,7 @@
  */
 import "dotenv/config";
 import { loadConfig } from "../src/config.js";
-import { buildGraphQLQuery } from "../src/graphql.js";
+import { buildGraphQLQuery, buildMergedQuery } from "../src/graphql.js";
 
 function main() {
   const config = process.env.CONFIG_PATH ? loadConfig(process.env.CONFIG_PATH) : loadConfig();
@@ -38,22 +38,26 @@ Alchemy Webhook 手动配置指南
   Network: ${config.network}
   Webhook URL: ${url}
 
-  GraphQL Query:
-  ----------------------------------------
+  GraphQL Query（请整体复制到 Dashboard，仅一条）:
 `);
-  for (const target of config.targets) {
-    if (target.type === "events" || target.type === "internal_calls" || target.type === "transactions") {
-      const query = buildGraphQLQuery(target);
-      console.log(`  # ${target.label ?? target.type}`);
-      console.log(query);
-      console.log(`  ----------------------------------------`);
+
+  if (config.singleWebhook) {
+    console.log(buildMergedQuery(config));
+  } else {
+    for (let i = 0; i < config.targets.length; i++) {
+      const target = config.targets[i]!;
+      if (target.type === "events" || target.type === "internal_calls" || target.type === "transactions") {
+        if (i > 0) console.log("");
+        console.log(`  # 以下为 target ${i + 1}/${config.targets.length}: ${target.label ?? target.type}`);
+        console.log(buildGraphQLQuery(target));
+      }
     }
   }
 
   console.log(`
 【步骤 4】创建 Webhook 后
-  - 在 Webhook 详情页复制 Signing Key
-  - 填入 .env 的 SIGNING_KEYS=whsec_xxx
+  - 单 Webhook 模式: 将 Signing Key 填入 config 的 targets.signing_key
+  - 多 Webhook 模式: 将每个 Signing Key 填入对应 target 的 signing_key 或 .env 的 SIGNING_KEYS
   - 重启 npm run monitor
 
 【步骤 5】测试

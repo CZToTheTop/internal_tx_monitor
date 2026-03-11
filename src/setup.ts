@@ -9,7 +9,7 @@
  */
 import "dotenv/config";
 import { loadConfig } from "./config.js";
-import { buildGraphQLQuery } from "./graphql.js";
+import { buildGraphQLQuery, buildMergedQuery } from "./graphql.js";
 import { createWebhook } from "./alchemy-api.js";
 
 const authToken = process.env.ALCHEMY_AUTH_TOKEN;
@@ -30,24 +30,22 @@ async function main(): Promise<void> {
   }
   console.log(`网络: ${config.network}`);
   console.log(`Webhook URL: ${config.webhookUrl}`);
-  console.log(`监控目标: ${config.targets.length} 个\n`);
+  console.log(`监控目标: ${config.targets.length} 个`);
+  if (config.singleWebhook) {
+    console.log("模式: 单 Webhook（整份 config 共用一个，服务端按 target 多维度筛查）\n");
+  } else {
+    console.log("");
+  }
 
   const signingKeys: string[] = [];
 
-  for (let i = 0; i < config.targets.length; i++) {
-    const target = config.targets[i]!;
-    const label = target.label ?? `${target.type}_${i}`;
-    const name = `monitor_${label}_${Date.now()}`.replace(/\s+/g, "_");
-
-    const query = buildGraphQLQuery(target);
-    const network = target.network ?? config.network;
-    console.log(`创建 Webhook [${i + 1}/${config.targets.length}]: ${label}`);
-    console.log(`  网络: ${network}  类型: ${target.type}`);
-    console.log(`  地址: ${target.addresses.slice(0, 2).join(", ")}${target.addresses.length > 2 ? "..." : ""}`);
-
+  if (config.singleWebhook) {
+    const name = `monitor_merged_${Date.now()}`;
+    console.log("创建 1 个合并 Webhook（覆盖所有 target 的过滤条件）");
     try {
+      const query = buildMergedQuery(config);
       const { id, signingKey } = await createWebhook(token, {
-        network,
+        network: config.network,
         webhookUrl: config.webhookUrl,
         graphqlQuery: query,
         name,
@@ -58,15 +56,47 @@ async function main(): Promise<void> {
         console.log(`  Signing Key: ${signingKey.slice(0, 12)}...`);
       }
     } catch (err) {
-      console.error(`  ❌ 失败:`, err);
+      console.error("  ❌ 失败:", err);
     }
-    console.log("");
+  } else {
+    for (let i = 0; i < config.targets.length; i++) {
+      const target = config.targets[i]!;
+      const label = target.label ?? `${target.type}_${i}`;
+      const name = `monitor_${label}_${Date.now()}`.replace(/\s+/g, "_");
+
+      const query = buildGraphQLQuery(target);
+      const network = target.network ?? config.network;
+      console.log(`创建 Webhook [${i + 1}/${config.targets.length}]: ${label}`);
+      console.log(`  网络: ${network}  类型: ${target.type}`);
+      console.log(`  地址: ${target.addresses?.slice(0, 2).join(", ")}${(target.addresses?.length ?? 0) > 2 ? "..." : ""}`);
+
+      try {
+        const { id, signingKey } = await createWebhook(token, {
+          network,
+          webhookUrl: config.webhookUrl,
+          graphqlQuery: query,
+          name,
+        });
+        console.log(`  ✅ 已创建: ${id}`);
+        if (signingKey) {
+          signingKeys.push(signingKey);
+          console.log(`  Signing Key: ${signingKey.slice(0, 12)}...`);
+        }
+      } catch (err) {
+        console.error(`  ❌ 失败:`, err);
+      }
+      console.log("");
+    }
   }
 
   if (signingKeys.length) {
     console.log("---");
-    console.log("请将每个 Webhook 的 Signing Key 填入 config.yaml 对应 target 的 signing_key（推荐），");
-    console.log("或填入 .env: SIGNING_KEYS=" + signingKeys.join(","));
+    if (config.singleWebhook) {
+      console.log("请将上述 Signing Key 填入 config 的 targets.signing_key（单 Webhook 模式）");
+    } else {
+      console.log("请将每个 Webhook 的 Signing Key 填入 config.yaml 对应 target 的 signing_key（推荐），");
+      console.log("或填入 .env: SIGNING_KEYS=" + signingKeys.join(","));
+    }
     console.log("");
     console.log("然后运行: npm run monitor");
   }

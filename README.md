@@ -46,8 +46,9 @@ npm run setup
 
 ### 配置 (config.yaml)
 
-- **多链同一 webhook**：同一 `webhookUrl`，每个 target 可写 `network`；`npm run setup` 后把每个 webhook 的 Signing Key 填到该 target 的 `signing_key`（推荐）或 `.env` 的 `SIGNING_KEYS`。
-- **signing_key per target**：在 config 中为每个 target 配置 `signing_key`，入站请求会用签名匹配到对应 target，从而区分 events / transactions / internal_calls，避免误报。**配置后无需再在 .env 中设置 SIGNING_KEYS**。
+- **单 Webhook 模式（推荐，避免 Alchemy 数量限制）**：在顶层设置 `singleWebhook: true`，整份 config 只创建 **1 个** Alchemy Webhook，服务端按每个 target 的地址/方法/类型做多维度筛查，匹配到的每条 log/tx/trace 按对应 target 的 label 分别发 Telegram。只需把该 Webhook 的 Signing Key 填入 `.env` 的 `SIGNING_KEYS`。此时所有 target 共用同一网络（`config.network`）。
+- **多 Webhook 模式**：不设 `singleWebhook` 或设为 `false` 时，每个 target 对应一个 Webhook；每个 target 可写 `network`；`npm run setup` 后把每个 webhook 的 Signing Key 填到该 target 的 `signing_key`（推荐）或 `.env` 的 `SIGNING_KEYS`。
+- **signing_key per target**（仅多 Webhook 模式）：在 config 中为每个 target 配置 `signing_key`，入站请求用签名区分是哪个监控，避免误报。
 - **methodSelectors**：仅当 internal call 的 `input` 以配置的 selector 开头时才发报警。
 
 ```yaml
@@ -133,9 +134,13 @@ npm run setup
 
 ### Config (config.yaml)
 
+- **Single webhook mode** (recommended to stay within Alchemy webhook limits): Set `singleWebhook: true` at the top level. Only **one** Alchemy webhook is created for the whole config; the server matches each incoming log/tx/trace against every target (address, method, type) and sends one Telegram alert per matching target. Put that webhook’s Signing Key in `.env` as `SIGNING_KEYS`. All targets use the same network (`config.network`).
+- **Multi-webhook mode**: Omit `singleWebhook` or set it to `false`; each target gets its own webhook. Use per-target `signing_key` or `.env` `SIGNING_KEYS` to validate requests.
+
 ```yaml
 network: BNB_MAINNET   # or eth_mainnet, polygon_mainnet, etc.
 webhookUrl: https://your-server.com/webhook
+# singleWebhook: true   # one webhook for all targets, server does filtering
 
 targets:
   - type: events
