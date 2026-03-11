@@ -11,13 +11,15 @@ export interface MonitorTarget {
   type: MonitorType;
   /** 合约地址列表 (checksum 格式) */
   addresses: string[];
+  /** 可选：该 target 所属链（events/transactions/internal_calls 均可配置），不填则用顶层 network */
+  network?: string;
   /** 仅 events 类型: 事件 topic 过滤，空数组表示匹配所有事件 */
   topics?: string[];
   /** 仅 internal_calls: 过滤 from 地址，空表示任意 */
   fromAddresses?: string[];
   /** 仅 internal_calls: 过滤 to 地址，空表示任意 */
   toAddresses?: string[];
-  /** 仅 internal_calls: 按 method selector 过滤（input 前 4 字节），如 transfer 为 0xa9059cbb */
+  /** 仅 internal_calls: 按 method selector 过滤（input 前 4 字节），如 transfer 为 0xa9059cbb；配置后仅 input 匹配的 internal call 会触发报警 */
   methodSelectors?: string[];
   /** 仅 transactions: 过滤 from 地址 */
   txFrom?: string[];
@@ -66,5 +68,8 @@ export function loadConfig(path?: string): Config {
   }
   parsed.webhookUrl = parsed.webhookUrl ?? "";
   parsed.network = NETWORK_MAP[parsed.network] ?? parsed.network;
+  for (const t of parsed.targets) {
+    if (t.network) t.network = NETWORK_MAP[t.network] ?? t.network;
+  }
   return parsed;
 }

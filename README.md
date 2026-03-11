@@ -46,8 +46,11 @@ npm run setup
 
 ### 配置 (config.yaml)
 
+- **多链同一 webhook**：同一 `webhookUrl`，每个 target 可写 `network`（如 BNB_MAINNET、ETH_MAINNET），`npm run setup` 会为每个 target 创建一个 webhook，所有 Signing Key 填到 `.env` 的 `SIGNING_KEYS`（逗号分隔）。
+- **methodSelectors**：仅当 internal call 的 `input` 以配置的 selector 开头时才发报警。
+
 ```yaml
-network: BNB_MAINNET   # 或 eth_mainnet, polygon_mainnet 等
+network: eth_mainnet
 webhookUrl: https://your-server.com/webhook
 
 targets:
@@ -57,10 +60,11 @@ targets:
     topics: ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]
 
   - type: internal_calls
-    label: "Transfer to USDT"
+    label: "Transfer to USDT (BSC)"
+    network: BNB_MAINNET
     addresses: ["0x55d398326f99059fF775485246999027B3197955"]
     toAddresses: ["0x55d398326f99059fF775485246999027B3197955"]
-    methodSelectors: ["0xa9059cbb"]   # transfer(address,uint256)
+    methodSelectors: ["0xa9059cbb"]   # 仅 input 匹配时报警
 ```
 
 ### Telegram 通知

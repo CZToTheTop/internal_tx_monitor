@@ -120,6 +120,7 @@ export function createEventHandler(config: Config): (event: AlchemyWebhookEvent)
 
     formatEvent(event, traces);
 
+    // 配置了 methodSelectors 时，traces 已过滤为 input startsWith 任一 selector；仅此时 traceCount>0 才发报警
     if (logs > 0 || txs > 0 || traceCount > 0) {
       const msg = buildTelegramMessage(
         event,

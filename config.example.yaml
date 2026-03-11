@@ -1,35 +1,37 @@
 # Alchemy 链上监控配置
 # 复制为 config.yaml 并修改
 
-# 网络: eth_mainnet, eth_sepolia, polygon_mainnet, arbitrum_mainnet, optimism_mainnet, base_mainnet 等
+# 默认网络；多链时可在 target 下用 network 覆盖，同一 webhookUrl + 多个 SIGNING_KEYS 即可
 network: eth_mainnet
 
 # Webhook 接收地址，需公网可访问 (隧道如 cloudflared，或部署后的服务器 URL)
 webhookUrl: https://your-server.com/webhook
 
 targets:
-  # 1. 监控合约事件 (logs)
+  # 1. 监控合约事件 (logs)，可选 network 覆盖默认链
   - type: events
     label: "USDC Transfer"
+    # network: ETH_MAINNET
     addresses:
       - "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
     topics:
       - "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"  # Transfer(address,address,uint256)
 
-  # 2. 监控外部交易 (用户直接调用的交易)
+  # 2. 监控外部交易 (用户直接调用的交易)，可选 network
   - type: transactions
     label: "Calls to Vault"
+    # network: ETH_MAINNET
     addresses:
       - "0x388C818CA8B9251b393131C08a736A67ccB19297"
     txTo:
       - "0x388C818CA8B9251b393131C08a736A67ccB19297"
 
-  # 3. 监控内部调用 (含合约 A 调用合约 B，支持 call/delegatecall)
+  # 3. 监控内部调用，可选 network（多链同一 webhook 时每个 target 可指定不同链）
   - type: internal_calls
-    label: "Internal calls to Router"
+    label: "Transfer to USDT (BSC)"
+    network: BNB_MAINNET
     addresses:
-      - "0x5c43B1eD97e52d009611D89b74fA829FE4ac56b1"
+      - "0x55d398326f99059fF775485246999027B3197955"
     toAddresses:
-      - "0x5c43B1eD97e52d009611D89b74fA829FE4ac56b1"
-    # fromAddresses: []  # 空表示任意 from
-    # methodSelectors: ["0xa9059cbb"]  # 仅监控 transfer(address,uint256)，可选
+      - "0x55d398326f99059fF775485246999027B3197955"
+    methodSelectors: ["0xa9059cbb"]  # 仅当 internal call 的 input 以此 selector 开头时报警

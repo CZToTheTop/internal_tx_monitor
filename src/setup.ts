@@ -40,13 +40,14 @@ async function main(): Promise<void> {
     const name = `monitor_${label}_${Date.now()}`.replace(/\s+/g, "_");
 
     const query = buildGraphQLQuery(target);
+    const network = target.network ?? config.network;
     console.log(`创建 Webhook [${i + 1}/${config.targets.length}]: ${label}`);
-    console.log(`  类型: ${target.type}`);
+    console.log(`  网络: ${network}  类型: ${target.type}`);
     console.log(`  地址: ${target.addresses.slice(0, 2).join(", ")}${target.addresses.length > 2 ? "..." : ""}`);
 
     try {
       const { id, signingKey } = await createWebhook(token, {
-        network: config.network,
+        network,
         webhookUrl: config.webhookUrl,
         graphqlQuery: query,
         name,
