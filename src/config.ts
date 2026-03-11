@@ -31,22 +31,32 @@ export interface MonitorTarget {
   label?: string;
 }
 
+/** 一个 signing_key 对应的一组规则（收到 event 后先按 signing_key 分流，再在该组内按规则匹配） */
+export interface WebhookGroup {
+  signingKey: string;
+  targets: MonitorTarget[];
+}
+
 /** 主配置 */
 export interface Config {
   /** 监听的链/网络 */
   network: string;
-  /** 监控目标列表 */
+  /** 监控目标列表（单 Webhook / 多 Webhook 时用）；多组模式时由 webhookGroups 提供） */
   targets: MonitorTarget[];
   /** Webhook 接收地址 (需公网可访问，如 ngrok) */
   webhookUrl: string;
   /**
    * 单 Webhook 模式：整份 config 只创建 1 个 Alchemy Webhook，在服务端按 target 做多维度筛查并分别报警。
-   * 为 true 时不受 Alchemy Webhook 数量限制，每个 target 相当于一个“虚拟监控”。
    * 此时 signing_key 应写在 targets 下（targets.signing_key），而非每个 target 的 type 后。
    */
   singleWebhook?: boolean;
   /** 单 Webhook 模式下的唯一 Signing Key，从 targets.signing_key 解析得到 */
   singleWebhookSigningKey?: string;
+  /**
+   * 多组模式：每个 signing_key 对应一组规则。收到 event 后先按 signing_key 分流到对应组，再在该组内按规则匹配并报警。
+   * 配置为 targets: [ { signing_key, list: [...] }, { signing_key, list: [...] } ] 时解析得到。
+   */
+  webhookGroups?: WebhookGroup[];
 }
 
 const NETWORK_MAP: Record<string, string> = {
@@ -81,11 +91,32 @@ export function loadConfig(path?: string): Config {
 
   let targets: MonitorTarget[];
   let singleWebhookSigningKey: string | undefined;
+  let webhookGroups: WebhookGroup[] | undefined;
 
   const rawTargets = parsed.targets;
-  if (Array.isArray(rawTargets) && rawTargets.length > 0) {
+  const first = Array.isArray(rawTargets) && rawTargets.length > 0 ? rawTargets[0] : null;
+  const isGroupItem =
+    first &&
+    typeof first === "object" &&
+    !Array.isArray(first) &&
+    "list" in first &&
+    Array.isArray((first as { list?: unknown[] }).list) &&
+    "signing_key" in first;
+
+  if (Array.isArray(rawTargets) && rawTargets.length > 0 && isGroupItem) {
+    webhookGroups = (rawTargets as { signing_key?: string; list: MonitorTarget[] }[]).map((g) => ({
+      signingKey: (g.signing_key ?? "").trim(),
+      targets: g.list ?? [],
+    }));
+    targets = webhookGroups.flatMap((g) => g.targets);
+    singleWebhookSigningKey = undefined;
+    if (targets.length === 0) {
+      throw new Error("config.yaml 至少一个 group 的 list 不能为空");
+    }
+  } else if (Array.isArray(rawTargets) && rawTargets.length > 0) {
     targets = rawTargets as MonitorTarget[];
     singleWebhookSigningKey = undefined;
+    webhookGroups = undefined;
   } else if (
     rawTargets &&
     typeof rawTargets === "object" &&
@@ -95,11 +126,14 @@ export function loadConfig(path?: string): Config {
     const obj = rawTargets as { signing_key?: string; list: MonitorTarget[] };
     singleWebhookSigningKey = obj.signing_key?.trim() || undefined;
     targets = obj.list;
+    webhookGroups = undefined;
     if (!targets.length) {
       throw new Error("config.yaml targets.list 不能为空");
     }
   } else {
-    throw new Error("config.yaml 的 targets 须为数组，或为含 list 数组的对象（单 Webhook 时用 targets.signing_key + targets.list）");
+    throw new Error(
+      "config.yaml 的 targets 须为：数组（多 Webhook）、含 list 的对象（单 Webhook）、或「数组的数组」每项为 { signing_key, list }（多组）"
+    );
   }
 
   for (const t of targets) {
@@ -112,5 +146,6 @@ export function loadConfig(path?: string): Config {
     webhookUrl,
     singleWebhook: parsed.singleWebhook as boolean | undefined,
     singleWebhookSigningKey,
+    webhookGroups,
   };
 }

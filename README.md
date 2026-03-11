@@ -41,32 +41,53 @@ cloudflared tunnel --url http://localhost:8080
 
 # 3. 创建 Webhook
 npm run setup
-# 将输出的 SIGNING_KEYS 填入 .env
+# 单 Webhook / 多组：将输出的 Signing Key 填回 config 对应位置；多 Webhook 可填 .env 的 SIGNING_KEYS
 ```
 
 ### 配置 (config.yaml)
 
-- **单 Webhook 模式（推荐，避免 Alchemy 数量限制）**：在顶层设置 `singleWebhook: true`，整份 config 只创建 **1 个** Alchemy Webhook，服务端按每个 target 的地址/方法/类型做多维度筛查，匹配到的每条 log/tx/trace 按对应 target 的 label 分别发 Telegram。只需把该 Webhook 的 Signing Key 填入 `.env` 的 `SIGNING_KEYS`。此时所有 target 共用同一网络（`config.network`）。
-- **多 Webhook 模式**：不设 `singleWebhook` 或设为 `false` 时，每个 target 对应一个 Webhook；每个 target 可写 `network`；`npm run setup` 后把每个 webhook 的 Signing Key 填到该 target 的 `signing_key`（推荐）或 `.env` 的 `SIGNING_KEYS`。
-- **signing_key per target**（仅多 Webhook 模式）：在 config 中为每个 target 配置 `signing_key`，入站请求用签名区分是哪个监控，避免误报。
-- **methodSelectors**：仅当 internal call 的 `input` 以配置的 selector 开头时才发报警。
+`targets` 有三种写法，对应三种模式：
+
+| 模式 | targets 写法 | 说明 |
+|------|--------------|------|
+| **单 Webhook** | `targets: { signing_key, list: [ ... ] }` + `singleWebhook: true` | 只建 1 个 Webhook，一个 key，多条规则；服务端按规则匹配，用对应 label 报警。Signing Key 填到 `targets.signing_key`。 |
+| **多组** | `targets: [ { signing_key, list: [ ... ] }, ... ]` | 每个 key 对应一组规则；收到 event 先按 signing_key 分流到组，再在该组内按规则匹配报警。每组一个 Webhook，setup 后按顺序填各组的 `signing_key`。 |
+| **多 Webhook** | `targets: [ { type, label, signing_key?, ... }, ... ]` | 每个 target 一个 Webhook；按 target 的 `signing_key` 或 `.env` 的 `SIGNING_KEYS` 校验。 |
+
+- **methodSelectors**（internal_calls）：仅当 internal call 的 `input` 以配置的 selector 开头时才发报警。
+- 示例配置：见 [config.safe-timelock-test.yaml](config.safe-timelock-test.yaml)（Safe → Timelock schedule/execute 等）。
+
+**单 Webhook 示例：**
 
 ```yaml
-network: eth_mainnet
+network: bsc_mainnet
 webhookUrl: https://your-server.com/webhook
+singleWebhook: true
 
 targets:
-  - type: events
-    label: "USDC Transfer"
-    addresses: ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"]
-    topics: ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]
+  signing_key: ""   # npm run setup 后填
+  list:
+    - type: internal_calls
+      label: "Safe → Timelock"
+      fromAddresses: ["0x8d38..."]
+      toAddresses: ["0x2e28..."]
+      methodSelectors: ["0x56055f7d", "0x134008d3"]
+```
 
-  - type: internal_calls
-    label: "Transfer to USDT (BSC)"
-    network: BNB_MAINNET
-    addresses: ["0x55d398326f99059fF775485246999027B3197955"]
-    toAddresses: ["0x55d398326f99059fF775485246999027B3197955"]
-    methodSelectors: ["0xa9059cbb"]   # 仅 input 匹配时报警
+**多组示例（每个 signing_key 对应多条规则）：**
+
+```yaml
+targets:
+  - signing_key: ""
+    list:
+      - type: internal_calls
+        label: "规则1"
+        ...
+  - signing_key: ""
+    list:
+      - type: events
+        label: "规则2"
+        ...
 ```
 
 ### Telegram 通知
@@ -129,30 +150,34 @@ cloudflared tunnel --url http://localhost:8080
 
 # 3. Create webhooks
 npm run setup
-# Add SIGNING_KEYS to .env
+# Single / multi-group: fill Signing Key(s) into config; multi-webhook: can use .env SIGNING_KEYS
 ```
 
 ### Config (config.yaml)
 
-- **Single webhook mode** (recommended to stay within Alchemy webhook limits): Set `singleWebhook: true` at the top level. Only **one** Alchemy webhook is created for the whole config; the server matches each incoming log/tx/trace against every target (address, method, type) and sends one Telegram alert per matching target. Put that webhook’s Signing Key in `.env` as `SIGNING_KEYS`. All targets use the same network (`config.network`).
-- **Multi-webhook mode**: Omit `singleWebhook` or set it to `false`; each target gets its own webhook. Use per-target `signing_key` or `.env` `SIGNING_KEYS` to validate requests.
+Three `targets` shapes:
+
+| Mode | targets shape | Behavior |
+|------|----------------|----------|
+| **Single webhook** | `targets: { signing_key, list: [ ... ] }` + `singleWebhook: true` | One webhook, one key, multiple rules; server matches and alerts per rule label. Put Signing Key in `targets.signing_key`. |
+| **Multi-group** | `targets: [ { signing_key, list: [ ... ] }, ... ]` | Each key = one group of rules; request is routed by signing_key, then matched against that group only. One webhook per group; fill each group’s `signing_key` after setup. |
+| **Multi-webhook** | `targets: [ { type, label, signing_key?, ... }, ... ]` | One webhook per target; validate by per-target `signing_key` or `.env` `SIGNING_KEYS`. |
+
+Example config: [config.safe-timelock-test.yaml](config.safe-timelock-test.yaml) (Safe → Timelock schedule/execute).
 
 ```yaml
-network: BNB_MAINNET   # or eth_mainnet, polygon_mainnet, etc.
+network: BNB_MAINNET
 webhookUrl: https://your-server.com/webhook
-# singleWebhook: true   # one webhook for all targets, server does filtering
+singleWebhook: true
 
 targets:
-  - type: events
-    label: "USDC Transfer"
-    addresses: ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"]
-    topics: ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]
-
-  - type: internal_calls
-    label: "Transfer to USDT"
-    addresses: ["0x55d398326f99059fF775485246999027B3197955"]
-    toAddresses: ["0x55d398326f99059fF775485246999027B3197955"]
-    methodSelectors: ["0xa9059cbb"]   # transfer(address,uint256)
+  signing_key: ""
+  list:
+    - type: internal_calls
+      label: "Safe → Timelock"
+      fromAddresses: ["0x8d38..."]
+      toAddresses: ["0x2e28..."]
+      methodSelectors: ["0x56055f7d", "0x134008d3"]
 ```
 
 ### Telegram Notifications
@@ -187,8 +212,9 @@ Create bot via [@BotFather](https://t.me/BotFather); get chat_id from `https://a
 
 ```
 monitor/
-├── config.yaml          # Your config (gitignored)
-├── config.example.yaml  # Config template
+├── config.yaml                    # Your config (gitignored)
+├── config.example.yaml            # Config template
+├── config.safe-timelock-test.yaml # Example: Safe → Timelock schedule/execute
 ├── src/
 │   ├── index.ts         # Entry
 │   ├── server.ts        # Webhook server

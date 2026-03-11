@@ -1,4 +1,4 @@
-import type { Config, MonitorTarget } from "./config.js";
+import type { Config, MonitorTarget, WebhookGroup } from "./config.js";
 import type { AlchemyWebhookEvent } from "./webhook-util.js";
 import { sendTelegram, getExplorerBase } from "./telegram.js";
 
@@ -164,15 +164,17 @@ function getTxHashFromItem(
   return out || null;
 }
 
-/** 单 Webhook 模式：每条 log/tx/trace 与 config 里对应类型条目匹配，命中则用该条目的 label 报警 */
+/** 按规则匹配：每条 log/tx/trace 与给定 target 列表匹配，命中则用该条目的 label 报警；targetsOverride 为空则用 config.targets（多组时传入该组 targets） */
 function alertByTargetMatch(
   config: Config,
   block: NonNullable<AlchemyWebhookEvent["event"]["data"]>["block"],
-  getTxHashFallback: () => string | null
+  getTxHashFallback: () => string | null,
+  targetsOverride?: MonitorTarget[]
 ): void {
-  const eventTargets = config.targets.filter((t) => t.type === "events") as MonitorTarget[];
-  const txTargets = config.targets.filter((t) => t.type === "transactions") as MonitorTarget[];
-  const internalTargets = config.targets.filter((t) => t.type === "internal_calls") as MonitorTarget[];
+  const base = targetsOverride ?? config.targets;
+  const eventTargets = base.filter((t) => t.type === "events") as MonitorTarget[];
+  const txTargets = base.filter((t) => t.type === "transactions") as MonitorTarget[];
+  const internalTargets = base.filter((t) => t.type === "internal_calls") as MonitorTarget[];
   const blockTx0 = block?.transactions?.[0] as { hash?: string } | undefined;
 
   // 有 log 时：看 log 对应 config 里哪个 events 条目，用该条目的 label
@@ -216,12 +218,18 @@ function alertByTargetMatch(
 }
 
 /**
- * 创建事件处理器：根据 matchedTarget 区分监控类型，仅对对应数据（log/tx/traces）报警
+ * 创建事件处理器：根据 matchedTarget / matchedGroup 区分；多组时先按 signing_key 分流，再在组内按规则匹配报警
  */
-export function createEventHandler(config: Config): (event: AlchemyWebhookEvent, matchedTarget?: MonitorTarget) => void {
+export function createEventHandler(
+  config: Config
+): (event: AlchemyWebhookEvent, matchedTarget?: MonitorTarget, matchedGroup?: WebhookGroup) => void {
   const methodSelectors = getMethodSelectors(config);
 
-  return function eventHandler(event: AlchemyWebhookEvent, matchedTarget?: MonitorTarget): void {
+  return function eventHandler(
+    event: AlchemyWebhookEvent,
+    matchedTarget?: MonitorTarget,
+    matchedGroup?: WebhookGroup
+  ): void {
     const block = event?.event?.data?.block;
     let traces = block?.callTracerTraces;
     const targetSelectors = matchedTarget ? getTargetMethodSelectors(matchedTarget) : methodSelectors;
@@ -250,8 +258,11 @@ export function createEventHandler(config: Config): (event: AlchemyWebhookEvent,
         const label = matchedTarget.label ?? "链上监控";
         sendTelegram(buildTelegramMessage(network, txHash, label)).catch(() => {});
       }
+    } else if (matchedGroup?.targets?.length) {
+      // 多组模式：已按 signing_key 分流到该组，只在该组内按规则匹配报警
+      alertByTargetMatch(config, block, () => getTxHash(event), matchedGroup.targets);
     } else {
-      // 单 Webhook 模式或仅用 env key 校验：将 payload 与所有 target 做多维匹配，按 target 分别报警
+      // 单 Webhook 模式或仅用 env key 校验：将 payload 与 config.targets 做多维匹配，按 target 分别报警
       if (block && config.targets.length > 0) {
         alertByTargetMatch(config, block, () => getTxHash(event));
       }

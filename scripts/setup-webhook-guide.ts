@@ -38,10 +38,18 @@ Alchemy Webhook 手动配置指南
   Network: ${config.network}
   Webhook URL: ${url}
 
-  GraphQL Query（请整体复制到 Dashboard，仅一条）:
+  GraphQL Query:
 `);
 
-  if (config.singleWebhook) {
+  if (config.webhookGroups?.length) {
+    for (let i = 0; i < config.webhookGroups.length; i++) {
+      const group = config.webhookGroups[i]!;
+      if (i > 0) console.log("");
+      console.log(`  # 组 ${i + 1}/${config.webhookGroups.length}（${group.targets.length} 条规则，对应一个 Webhook + 一个 signing_key）`);
+      console.log(buildMergedQuery({ ...config, targets: group.targets }));
+    }
+  } else if (config.singleWebhook) {
+    console.log("  # 单 Webhook，仅一条，请整体复制:");
     console.log(buildMergedQuery(config));
   } else {
     for (let i = 0; i < config.targets.length; i++) {

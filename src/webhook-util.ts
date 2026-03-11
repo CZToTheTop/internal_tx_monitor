@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "crypto";
-import type { Config, MonitorTarget } from "./config.js";
+import type { Config, MonitorTarget, WebhookGroup } from "./config.js";
 
 /**
  * 验证 Alchemy Webhook 签名（使用 constant-time 比较防 timing attack）
@@ -24,7 +24,7 @@ export function isValidSignature(
 }
 
 /**
- * 用 config 中每个 target 的 signing_key 匹配入站签名，返回匹配到的 target，用于区分是 log/tx/internal_calls
+ * 用 config 中每个 target 的 signing_key 匹配入站签名，返回匹配到的 target（多 Webhook 每 target 一个 key 时用）
  */
 export function getTargetForSignature(
   config: Config,
@@ -34,6 +34,23 @@ export function getTargetForSignature(
   for (const target of config.targets) {
     const key = target.signing_key?.trim();
     if (key && isValidSignature(body, signature, key)) return target;
+  }
+  return null;
+}
+
+/**
+ * 多组模式：用每个 group 的 signing_key 匹配入站签名，返回匹配到的组（该组内多条规则，收到 event 后只在该组内匹配）
+ */
+export function getGroupForSignature(
+  config: Config,
+  body: string,
+  signature: string
+): WebhookGroup | null {
+  const groups = config.webhookGroups;
+  if (!groups?.length) return null;
+  for (const group of groups) {
+    const key = group.signingKey?.trim();
+    if (key && isValidSignature(body, signature, key)) return group;
   }
   return null;
 }

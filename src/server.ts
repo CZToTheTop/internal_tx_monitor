@@ -1,6 +1,6 @@
 import express, { Request, Response } from "express";
-import type { Config, MonitorTarget } from "./config.js";
-import { getTargetForSignature, isValidSignature, type AlchemyWebhookEvent } from "./webhook-util.js";
+import type { Config, MonitorTarget, WebhookGroup } from "./config.js";
+import { getGroupForSignature, getTargetForSignature, isValidSignature, type AlchemyWebhookEvent } from "./webhook-util.js";
 
 const WEBHOOK_PATH = "/webhook";
 
@@ -19,7 +19,7 @@ export interface ServerOptions {
   config?: Config;
   /** 兼容旧版：未在 config 中配 signing_key 时用 env 的 key 列表 */
   signingKeys: string[];
-  onEvent: (event: AlchemyWebhookEvent, matchedTarget?: MonitorTarget) => void | Promise<void>;
+  onEvent: (event: AlchemyWebhookEvent, matchedTarget?: MonitorTarget, matchedGroup?: WebhookGroup) => void | Promise<void>;
 }
 
 /**
@@ -57,19 +57,25 @@ export function createServer(options: ServerOptions): express.Express {
       }
 
       const body = req.rawBody?.toString("utf8") ?? JSON.stringify(req.body);
-      // 单 Webhook 模式：用 config.targets 下的 signing_key（singleWebhookSigningKey）校验，不按 target 区分
+      // 多组模式：先按 signing_key 分流到对应组，handler 只在该组内按规则匹配
+      const matchedGroup = config?.webhookGroups?.length ? getGroupForSignature(config, body, signature!) : null;
       const validSingle =
+        !matchedGroup &&
         config?.singleWebhook &&
         config.singleWebhookSigningKey &&
         isValidSignature(body, signature!, config.singleWebhookSigningKey);
       const matchedTarget =
-        !validSingle && config ? getTargetForSignature(config, body, signature!) : null;
+        !matchedGroup && !validSingle && config ? getTargetForSignature(config, body, signature!) : null;
       const validEnv = signingKeys.length > 0 && signingKeys.some((k) => isValidSignature(body, signature!, k));
-      if (!validSingle && !matchedTarget && !validEnv) {
+      if (!matchedGroup && !validSingle && !matchedTarget && !validEnv) {
         res.status(401).send("Invalid signature");
         return;
       }
-      await onEvent(event, validSingle ? undefined : matchedTarget ?? undefined);
+      if (matchedGroup) {
+        await onEvent(event, undefined, matchedGroup);
+      } else {
+        await onEvent(event, validSingle ? undefined : matchedTarget ?? undefined, undefined);
+      }
       res.status(200).send("OK");
     } catch (err) {
       res.status(500).send("Internal error");

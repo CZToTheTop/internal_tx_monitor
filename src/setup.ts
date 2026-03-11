@@ -30,16 +30,45 @@ async function main(): Promise<void> {
   }
   console.log(`网络: ${config.network}`);
   console.log(`Webhook URL: ${config.webhookUrl}`);
-  console.log(`监控目标: ${config.targets.length} 个`);
-  if (config.singleWebhook) {
-    console.log("模式: 单 Webhook（整份 config 共用一个，服务端按 target 多维度筛查）\n");
+  const groups = config.webhookGroups;
+  if (groups?.length) {
+    console.log(`模式: 多组（${groups.length} 个 signing_key 组，每组多条规则，先按 key 分流再组内匹配）`);
+    console.log(`共 ${config.targets.length} 条规则\n`);
   } else {
-    console.log("");
+    console.log(`监控目标: ${config.targets.length} 个`);
+    if (config.singleWebhook) {
+      console.log("模式: 单 Webhook（整份 config 共用一个，服务端按 target 多维度筛查）\n");
+    } else {
+      console.log("");
+    }
   }
 
   const signingKeys: string[] = [];
 
-  if (config.singleWebhook) {
+  if (groups?.length) {
+    for (let i = 0; i < groups.length; i++) {
+      const group = groups[i]!;
+      const name = `monitor_group_${i + 1}_${Date.now()}`;
+      console.log(`创建 Webhook 组 [${i + 1}/${groups.length}]（${group.targets.length} 条规则）`);
+      try {
+        const query = buildMergedQuery({ ...config, targets: group.targets });
+        const { id, signingKey } = await createWebhook(token, {
+          network: config.network,
+          webhookUrl: config.webhookUrl,
+          graphqlQuery: query,
+          name,
+        });
+        console.log(`  ✅ 已创建: ${id}`);
+        if (signingKey) {
+          signingKeys.push(signingKey);
+          console.log(`  Signing Key: ${signingKey.slice(0, 12)}... → 填到 config 第 ${i + 1} 个 group 的 signing_key`);
+        }
+      } catch (err) {
+        console.error("  ❌ 失败:", err);
+      }
+      console.log("");
+    }
+  } else if (config.singleWebhook) {
     const name = `monitor_merged_${Date.now()}`;
     console.log("创建 1 个合并 Webhook（覆盖所有 target 的过滤条件）");
     try {
@@ -91,7 +120,9 @@ async function main(): Promise<void> {
 
   if (signingKeys.length) {
     console.log("---");
-    if (config.singleWebhook) {
+    if (groups?.length) {
+      console.log("请将上述每个 Signing Key 按顺序填入 config 中对应 group 的 signing_key（第 1 个 key → 第 1 个 group）");
+    } else if (config.singleWebhook) {
       console.log("请将上述 Signing Key 填入 config 的 targets.signing_key（单 Webhook 模式）");
     } else {
       console.log("请将每个 Webhook 的 Signing Key 填入 config.yaml 对应 target 的 signing_key（推荐），");
