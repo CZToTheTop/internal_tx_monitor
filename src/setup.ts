@@ -65,8 +65,8 @@ async function main(): Promise<void> {
 
   if (signingKeys.length) {
     console.log("---");
-    console.log("请将以下 Signing Key 添加到 .env 文件:");
-    console.log(`SIGNING_KEYS=${signingKeys.join(",")}`);
+    console.log("请将每个 Webhook 的 Signing Key 填入 config.yaml 对应 target 的 signing_key（推荐），");
+    console.log("或填入 .env: SIGNING_KEYS=" + signingKeys.join(","));
     console.log("");
     console.log("然后运行: npm run monitor");
   }

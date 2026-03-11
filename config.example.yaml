@@ -1,35 +1,39 @@
 # Alchemy 链上监控配置
 # 复制为 config.yaml 并修改
 
-# 默认网络；多链时可在 target 下用 network 覆盖，同一 webhookUrl + 多个 SIGNING_KEYS 即可
+# 默认网络；多链时可在 target 下用 network 覆盖
 network: eth_mainnet
 
-# Webhook 接收地址，需公网可访问 (隧道如 cloudflared，或部署后的服务器 URL)
+# Webhook 接收地址，需公网可访问
 webhookUrl: https://your-server.com/webhook
 
+# 每个 target 可配置 signing_key（Alchemy 创建 Webhook 后返回），用于区分入站请求属于哪个监控，从而只处理 log / tx / internal_calls
 targets:
-  # 1. 监控合约事件 (logs)，可选 network 覆盖默认链
+  # 1. 监控合约事件 (logs)
   - type: events
     label: "USDC Transfer"
     # network: ETH_MAINNET
+    # signing_key: whsec_xxx
     addresses:
       - "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
     topics:
       - "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"  # Transfer(address,address,uint256)
 
-  # 2. 监控外部交易 (用户直接调用的交易)，可选 network
+  # 2. 监控外部交易
   - type: transactions
     label: "Calls to Vault"
     # network: ETH_MAINNET
+    # signing_key: whsec_yyy
     addresses:
       - "0x388C818CA8B9251b393131C08a736A67ccB19297"
     txTo:
       - "0x388C818CA8B9251b393131C08a736A67ccB19297"
 
-  # 3. 监控内部调用，可选 network（多链同一 webhook 时每个 target 可指定不同链）
+  # 3. 监控内部调用；signing_key 用于识别后只按 traces 报警（含 methodSelectors 过滤）
   - type: internal_calls
     label: "Transfer to USDT (BSC)"
     network: BNB_MAINNET
+    signing_key: whsec_zzz
     addresses:
       - "0x55d398326f99059fF775485246999027B3197955"
     toAddresses:

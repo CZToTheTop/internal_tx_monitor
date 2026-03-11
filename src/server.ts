@@ -1,5 +1,6 @@
 import express, { Request, Response } from "express";
-import { isValidSignature, type AlchemyWebhookEvent } from "./webhook-util.js";
+import type { Config, MonitorTarget } from "./config.js";
+import { getTargetForSignature, isValidSignature, type AlchemyWebhookEvent } from "./webhook-util.js";
 
 const WEBHOOK_PATH = "/webhook";
 
@@ -14,8 +15,11 @@ declare global {
 export interface ServerOptions {
   port: number;
   host: string;
+  /** 从 config 的 target.signing_key 匹配入站请求，区分哪个监控 */
+  config?: Config;
+  /** 兼容旧版：未在 config 中配 signing_key 时用 env 的 key 列表 */
   signingKeys: string[];
-  onEvent: (event: AlchemyWebhookEvent) => void | Promise<void>;
+  onEvent: (event: AlchemyWebhookEvent, matchedTarget?: MonitorTarget) => void | Promise<void>;
 }
 
 /**
@@ -23,7 +27,7 @@ export interface ServerOptions {
  * 支持多个 signing key（每个 webhook 一个）
  */
 export function createServer(options: ServerOptions): express.Express {
-  const { signingKeys, onEvent } = options;
+  const { config, signingKeys, onEvent } = options;
   const app = express();
 
   app.use(
@@ -53,17 +57,13 @@ export function createServer(options: ServerOptions): express.Express {
       }
 
       const body = req.rawBody?.toString("utf8") ?? JSON.stringify(req.body);
-      const valid =
-        skipValidation ||
-        (signingKeys.length > 0 &&
-          signingKeys.some((key) => isValidSignature(body, signature!, key)));
-
-      if (!valid) {
+      const matchedTarget = config ? getTargetForSignature(config, body, signature!) : null;
+      const validEnv = signingKeys.length > 0 && signingKeys.some((k) => isValidSignature(body, signature!, k));
+      if (!matchedTarget && !validEnv) {
         res.status(401).send("Invalid signature");
         return;
       }
-
-      await onEvent(event);
+      await onEvent(event, matchedTarget ?? undefined);
       res.status(200).send("OK");
     } catch (err) {
       res.status(500).send("Internal error");

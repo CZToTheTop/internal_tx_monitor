@@ -46,7 +46,8 @@ npm run setup
 
 ### 配置 (config.yaml)
 
-- **多链同一 webhook**：同一 `webhookUrl`，每个 target 可写 `network`（如 BNB_MAINNET、ETH_MAINNET），`npm run setup` 会为每个 target 创建一个 webhook，所有 Signing Key 填到 `.env` 的 `SIGNING_KEYS`（逗号分隔）。
+- **多链同一 webhook**：同一 `webhookUrl`，每个 target 可写 `network`；`npm run setup` 后把每个 webhook 的 Signing Key 填到该 target 的 `signing_key`（推荐）或 `.env` 的 `SIGNING_KEYS`。
+- **signing_key per target**：在 config 中为每个 target 配置 `signing_key`，入站请求会用签名匹配到对应 target，从而区分 events / transactions / internal_calls，避免误报。**配置后无需再在 .env 中设置 SIGNING_KEYS**。
 - **methodSelectors**：仅当 internal call 的 `input` 以配置的 selector 开头时才发报警。
 
 ```yaml

@@ -1,4 +1,4 @@
-import type { Config } from "./config.js";
+import type { Config, MonitorTarget } from "./config.js";
 import type { AlchemyWebhookEvent } from "./webhook-util.js";
 import { sendTelegram, getExplorerBase } from "./telegram.js";
 
@@ -97,20 +97,32 @@ function buildTelegramMessage(
   return parts.join("\n");
 }
 
+/** 从单个 target 收集 methodSelectors（仅 internal_calls） */
+function getTargetMethodSelectors(target: { type: string; methodSelectors?: unknown[] }): string[] {
+  const set = new Set<string>();
+  if (target.type !== "internal_calls" || !target.methodSelectors?.length) return [];
+  for (const s of target.methodSelectors) {
+    const n = normSelector(s);
+    if (n) set.add(n);
+  }
+  return [...set];
+}
+
 /**
- * 创建事件处理器，支持按 method selector 过滤 internal call traces，并发送 TG 通知
+ * 创建事件处理器：根据 matchedTarget 区分监控类型，仅对对应数据（log/tx/traces）报警
  */
-export function createEventHandler(config: Config): (event: AlchemyWebhookEvent) => void {
+export function createEventHandler(config: Config): (event: AlchemyWebhookEvent, matchedTarget?: MonitorTarget) => void {
   const methodSelectors = getMethodSelectors(config);
 
-  return function eventHandler(event: AlchemyWebhookEvent): void {
+  return function eventHandler(event: AlchemyWebhookEvent, matchedTarget?: MonitorTarget): void {
     const block = event?.event?.data?.block;
     let traces = block?.callTracerTraces;
+    const targetSelectors = matchedTarget ? getTargetMethodSelectors(matchedTarget) : methodSelectors;
 
-    if (traces?.length && methodSelectors.length) {
+    if (traces?.length && targetSelectors.length) {
       traces = traces.filter((t) => {
         const inp = ((t as { input?: string }).input ?? "").toLowerCase();
-        return methodSelectors.some((sel) => inp.startsWith(sel));
+        return targetSelectors.some((sel) => inp.startsWith(sel));
       });
     }
 
@@ -120,14 +132,24 @@ export function createEventHandler(config: Config): (event: AlchemyWebhookEvent)
 
     formatEvent(event, traces);
 
-    // 配置了 methodSelectors 时，traces 已过滤为 input startsWith 任一 selector；仅此时 traceCount>0 才发报警
-    if (logs > 0 || txs > 0 || traceCount > 0) {
+    const network = matchedTarget?.network ?? config.network;
+    let shouldAlert: boolean;
+    if (matchedTarget) {
+      if (matchedTarget.type === "events") shouldAlert = logs > 0;
+      else if (matchedTarget.type === "transactions") shouldAlert = txs > 0;
+      else shouldAlert = traceCount > 0; // internal_calls
+    } else {
+      const isInternalCallsPayload = (block?.callTracerTraces?.length ?? 0) > 0;
+      shouldAlert = isInternalCallsPayload ? traceCount > 0 : (logs > 0 || txs > 0);
+    }
+
+    if (shouldAlert) {
       const msg = buildTelegramMessage(
         event,
         logs,
         txs,
         traceCount,
-        config.network,
+        network,
         traces as unknown[] | undefined
       );
       sendTelegram(msg).catch(() => {});

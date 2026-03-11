@@ -17,6 +17,7 @@ const config = process.env.CONFIG_PATH ? loadConfig(process.env.CONFIG_PATH) : l
 const app = createServer({
   port: PORT,
   host: HOST,
+  config,
   signingKeys,
   onEvent: createEventHandler(config),
 });

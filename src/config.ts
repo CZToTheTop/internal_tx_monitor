@@ -13,6 +13,8 @@ export interface MonitorTarget {
   addresses: string[];
   /** 可选：该 target 所属链（events/transactions/internal_calls 均可配置），不填则用顶层 network */
   network?: string;
+  /** 可选：该监控对应的 Alchemy Webhook Signing Key，用于区分入站请求属于哪个 target */
+  signing_key?: string;
   /** 仅 events 类型: 事件 topic 过滤，空数组表示匹配所有事件 */
   topics?: string[];
   /** 仅 internal_calls: 过滤 from 地址，空表示任意 */
