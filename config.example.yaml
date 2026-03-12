@@ -1,51 +1,56 @@
 # ============================================================
-# 示例：BNB 上 Safe 对 Timelock 的 schedule / execute 监控
-# Safe: https://app.safe.global/transactions/history?safe=bnb:0x8d388136d578dcd791d081c6042284ced6d9b0c6
-# ============================================================
-# 用法：复制为 config.yaml 或 CONFIG_PATH=config.safe-timelock-test.yaml npm run setup
-# 将 toAddresses 中的 Timelock 地址改为实际合约；toAddresses 留空 [] 则监控 Safe 对任意合约的 schedule/execute
+# Alchemy 链上监控 - 配置示例
+# 复制为 config.yaml 后修改
 # ============================================================
 
-network: bsc_mainnet
+# ---------- 全局配置 ----------
+# 监听的链（eth_mainnet / BNB_MAINNET / polygon_mainnet 等）
+network: eth_mainnet
+
+# 公网可访问的 Webhook 地址（Alchemy 会向此 URL 推送数据）
 webhookUrl: https://your-server.com/webhook
 
-# 单 Webhook：一个 key，多条规则，服务端按规则匹配并分别用 label 报警
-singleWebhook: true
+# 单 Webhook 模式：
+#   true = 只创建 1 个 Webhook，signing_key 写在 targets 下，target 列表写在 targets.list
+# 多组模式：targets 为「数组的数组」每项为 { signing_key, list }，每个 key 对应一组规则，收到 event 先按 key 分流再组内匹配
+# singleWebhook: true
 
+# ---------- 监控目标 ------------
+# 三种写法任选一：
+# 1) 多 Webhook：targets 为数组，每项一个 target，可写 signing_key
+# 2) 单 Webhook：targets 为对象 { signing_key, list: [ ... ] }
+# 3) 多组：targets 为 [ { signing_key, list: [ ... ] }, { signing_key, list: [ ... ] } ]，每个 key 对应多条规则
 targets:
-  - signing_key: ""   # npm run setup 后把返回的 Signing Key 填此处
-    list:
-      # 规则 1：Safe 多签对 Timelock 的 schedule/execute
-      - type: internal_calls
-        label: "Safe → Timelock schedule/execute"
-        fromAddresses:
-          - "0x8d388136d578dcd791d081c6042284ced6d9b0c6"
-        toAddresses:
-          - "0x2e2807F88C381Cb0CC55c808a751fC1E3fcCbb85"   # 改为你的 Timelock 地址
-        methodSelectors:
-          - "0x56055f7d"   # schedule(address,uint256,bytes,bytes32,bytes32,uint256)
-          - "0x134008d3"   # execute(address,uint256,bytes,bytes32,bytes32)
 
-      # 规则 2：另一地址对某合约的 schedule 调用
-      - type: internal_calls
-        label: "Deposit Rewards schedule"
-        fromAddresses:
-          - "0x85ce862c5bb61938ffcc97da4a80c8aae43c6a27"
-        toAddresses:
-          - "0x307d13267f360f78005f476Fa913F8848F30292A"
-        methodSelectors:
-          - "0x50cc6cd6"
+  # --- 类型 1：合约事件 (logs) ---
+  - type: events
+    label: "USDC 转账"
+    signing_key: ""                     # 多 Webhook 时：setup 后填该 target 的 key
+    addresses:
+      - "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    topics:
+      - "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"  # Transfer(address,address,uint256)
+    # network: ETH_MAINNET
 
-  - signing_key: "whsec_OWPUGzW7EN4hozdBo73MFsGc"
-    list:
-      - type: internal_calls
-        label: "Role modification"
-        fromAddresses:
-          - "0x7625B1c374b0D1546d87c0ab66229461007f1e33"
-        toAddresses:
-          - []
-        methodSelectors:
-          - "0xd547741f"
-          - "0xd547741f"
-          - "0x2f2ff15d"
-          - "0x1785f53c"
+  # --- 类型 2：外部交易 (transactions) ---
+  - type: transactions
+    label: "Vault 被调用"
+    signing_key: ""
+    addresses: []
+    txFrom: []
+    txTo:
+      - "0x388C818CA8B9251b393131C08a736A67ccB19297"
+    # network: ETH_MAINNET
+
+  # --- 类型 3：内部调用 (internal_calls) ---
+  - type: internal_calls
+    label: "USDT transfer 被调用"
+    signing_key: ""
+    addresses:
+      - "0x55d398326f99059fF775485246999027B3197955"
+    fromAddresses: []
+    toAddresses:
+      - "0x55d398326f99059fF775485246999027B3197955"
+    methodSelectors:
+      - "0xa9059cbb"                    # transfer(address,uint256)
+    # network: BNB_MAINNET

@@ -52,20 +52,28 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/** 从 event 中取第一个交易 hash（transactions[0]、logs[0].transaction 或 traces 的 transaction） */
+/** 规范化 hash 为 0x + 64 位 hex，用于 explorer 链接 */
+function normalizeTxHash(h: string | null | undefined): string | null {
+  if (!h || typeof h !== "string") return null;
+  const hex = h.replace(/^0x/i, "").replace(/[^a-fA-F0-9]/g, "");
+  if (hex.length !== 64) return null;
+  return "0x" + hex.toLowerCase();
+}
+
+/** 从 event 中取第一个交易 hash（transactions[0]、logs[0].transaction 或 traces[0].transaction） */
 function getTxHash(event: AlchemyWebhookEvent): string | null {
   const block = event?.event?.data?.block;
   const tx = block?.transactions?.[0] as { hash?: string } | undefined;
-  if (tx?.hash) return (tx.hash ?? "").replace(/[^a-fA-F0-9x]/g, "") || null;
+  if (tx?.hash) return normalizeTxHash(tx.hash);
   const log = block?.logs?.[0] as { transaction?: { hash?: string } } | undefined;
-  if (log?.transaction?.hash) return (log.transaction.hash ?? "").replace(/[^a-fA-F0-9x]/g, "") || null;
+  if (log?.transaction?.hash) return normalizeTxHash(log.transaction.hash);
   const tr = block?.callTracerTraces?.[0] as { transaction?: { hash?: string }; transactionHash?: string } | undefined;
-  if (tr?.transaction?.hash) return (tr.transaction.hash ?? "").replace(/[^a-fA-F0-9x]/g, "") || null;
-  if (tr?.transactionHash) return (tr.transactionHash ?? "").replace(/[^a-fA-F0-9x]/g, "") || null;
+  if (tr?.transaction?.hash) return normalizeTxHash(tr.transaction.hash);
+  if (tr?.transactionHash) return normalizeTxHash(tr.transactionHash);
   return null;
 }
 
-/** 构建 TG 通知：使用命中条目的 label、network、txHash 区分是 config 里哪条规则 */
+/** 构建 TG 通知（英文）：label、network、tx hash 与 explorer 链接 */
 function buildTelegramMessage(
   network: string,
   txHash: string | null,
@@ -73,16 +81,18 @@ function buildTelegramMessage(
   kind?: "log" | "tx" | "internal_call"
 ): string {
   const base = getExplorerBase(network);
-  const kindLine = kind ? `类型: ${kind}\n` : "";
+  const kindLine = kind ? `Type: ${kind}\n` : "";
   const parts: string[] = [
     `🔔 <b>${escapeHtml(label)}</b>`,
     kindLine,
-    `网络: ${escapeHtml(network)}`,
+    `Network: ${escapeHtml(network)}`,
   ].filter(Boolean);
   if (txHash) {
-    parts.push(`交易: <a href="${base}/tx/${txHash}">${escapeHtml(txHash.slice(0, 10))}...${txHash.slice(-8)}</a>`);
+    const link = `${base}/tx/${txHash}`;
+    const short = txHash.slice(0, 10) + "..." + txHash.slice(-8);
+    parts.push(`Tx: <a href="${link}">${escapeHtml(short)}</a>`);
   } else {
-    parts.push("交易: —");
+    parts.push("Tx: —");
   }
   return parts.join("\n");
 }
@@ -153,15 +163,13 @@ function matchTraceToTargets(
   });
 }
 
-/** 从 log / tx / trace 取交易 hash */
+/** 从 log / tx / trace 取交易 hash（规范化 0x+64 hex） */
 function getTxHashFromItem(
   item: { transaction?: { hash?: string }; hash?: string },
   blockTx0?: { hash?: string }
 ): string | null {
   const h = item.transaction?.hash ?? item.hash ?? blockTx0?.hash;
-  if (!h || typeof h !== "string") return null;
-  const out = (h as string).replace(/[^a-fA-F0-9x]/g, "");
-  return out || null;
+  return normalizeTxHash(h);
 }
 
 /** 按规则匹配：每条 log/tx/trace 与给定 target 列表匹配，命中则用该条目的 label 报警；targetsOverride 为空则用 config.targets（多组时传入该组 targets） */
@@ -183,7 +191,7 @@ function alertByTargetMatch(
     const matched = matchLogToTargets(log as { account?: { address?: string }; topics?: string[] }, eventTargets);
     const txHash = getTxHashFromItem(log as { transaction?: { hash?: string } }, blockTx0) ?? getTxHashFallback();
     for (const t of matched) {
-      const label = t.label ?? "链上监控";
+      const label = t.label ?? "Monitor";
       const network = t.network ?? config.network;
       sendTelegram(buildTelegramMessage(network, txHash, label, "log")).catch(() => {});
     }
@@ -195,7 +203,7 @@ function alertByTargetMatch(
     const matched = matchTxToTargets(tx as { from?: { address?: string }; to?: { address?: string } }, txTargets);
     const txHash = getTxHashFromItem(tx as { hash?: string; transaction?: { hash?: string } }, blockTx0) ?? getTxHashFallback();
     for (const t of matched) {
-      const label = t.label ?? "链上监控";
+      const label = t.label ?? "Monitor";
       const network = t.network ?? config.network;
       sendTelegram(buildTelegramMessage(network, txHash, label, "tx")).catch(() => {});
     }
@@ -210,7 +218,7 @@ function alertByTargetMatch(
     );
     const txHash = getTxHashFromItem(trace as { transaction?: { hash?: string }; transactionHash?: string }, blockTx0) ?? getTxHashFallback();
     for (const t of matched) {
-      const label = t.label ?? "链上监控";
+      const label = t.label ?? "Monitor";
       const network = t.network ?? config.network;
       sendTelegram(buildTelegramMessage(network, txHash, label, "internal_call")).catch(() => {});
     }
@@ -255,7 +263,7 @@ export function createEventHandler(
       else shouldAlert = traceCount > 0; // internal_calls
       if (shouldAlert) {
         const txHash = getTxHash(event);
-        const label = matchedTarget.label ?? "链上监控";
+        const label = matchedTarget.label ?? "Monitor";
         sendTelegram(buildTelegramMessage(network, txHash, label)).catch(() => {});
       }
     } else if (matchedGroup?.targets?.length) {
