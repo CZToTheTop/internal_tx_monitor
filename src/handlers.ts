@@ -1,13 +1,31 @@
 import type { Config, MonitorTarget, WebhookGroup } from "./config.js";
 import type { AlchemyWebhookEvent } from "./webhook-util.js";
 import { sendTelegram, getExplorerBase } from "./telegram.js";
+import { getTraceToTxMapFromExplorer } from "./explorer-api.js";
+import { getRpcUrl, getTraceToTxMap } from "./trace-api.js";
 
-/** 规范化 method selector 为 0x + 8 位小写 hex */
 function normSelector(s: unknown): string | null {
   const str = Array.isArray(s) ? s[0] : s;
   if (typeof str !== "string") return null;
   const h = str.replace(/^0x/i, "").toLowerCase().slice(0, 8);
   return "0x" + h.padEnd(8, "0");
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function normalizeTxHash(h: string | null | undefined): string | null {
+  if (!h || typeof h !== "string") return null;
+  const hex = h.replace(/^0x/i, "").replace(/[^a-fA-F0-9]/g, "");
+  if (hex.length !== 64) return null;
+  return "0x" + hex.toLowerCase();
+}
+
+function parseBlockNumber(n: unknown): number | null {
+  if (typeof n === "number" && Number.isFinite(n)) return n;
+  if (typeof n === "string" && /^0x[0-9a-fA-F]+$/.test(n)) return parseInt(n, 16);
+  return null;
 }
 
 /** 从 config 收集所有 internal_calls 的 methodSelectors */
@@ -43,28 +61,12 @@ function formatEvent(event: AlchemyWebhookEvent, traces?: unknown[]): void {
   if (traceCount > 0) console.log("[webhook] traces:", truncate(JSON.stringify(traces ?? block?.callTracerTraces)));
 }
 
-/** 转义 HTML 特殊字符，防止注入 */
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-/** 规范化 hash 为 0x + 64 位 hex，用于 explorer 链接 */
-function normalizeTxHash(h: string | null | undefined): string | null {
-  if (!h || typeof h !== "string") return null;
-  const hex = h.replace(/^0x/i, "").replace(/[^a-fA-F0-9]/g, "");
-  if (hex.length !== 64) return null;
-  return "0x" + hex.toLowerCase();
-}
-
 /** 从 event 中取第一个交易 hash（transactions[0]、logs[0].transaction 或 traces[0].transaction） */
 function getTxHash(event: AlchemyWebhookEvent): string | null {
   const block = event?.event?.data?.block;
-  const tx = block?.transactions?.[0] as { hash?: string } | undefined;
-  if (tx?.hash) return normalizeTxHash(tx.hash);
+  const tx = block?.transactions?.[0] as string | { hash?: string } | undefined;
+  if (typeof tx === "string") return normalizeTxHash(tx);
+  if (tx && typeof tx === "object" && "hash" in tx && tx.hash) return normalizeTxHash(tx.hash);
   const log = block?.logs?.[0] as { transaction?: { hash?: string } } | undefined;
   if (log?.transaction?.hash) return normalizeTxHash(log.transaction.hash);
   const tr = block?.callTracerTraces?.[0] as { transaction?: { hash?: string }; transactionHash?: string } | undefined;
@@ -73,12 +75,13 @@ function getTxHash(event: AlchemyWebhookEvent): string | null {
   return null;
 }
 
-/** 构建 TG 通知（英文）：label、network、tx hash 与 explorer 链接 */
+/** 构建 TG 通知（英文）：label、network、tx hash 与 explorer 链接；internal_call 可带 input */
 function buildTelegramMessage(
   network: string,
   txHash: string | null,
   label: string,
-  kind?: "log" | "tx" | "internal_call"
+  kind?: "log" | "tx" | "internal_call",
+  input?: string
 ): string {
   const base = getExplorerBase(network);
   const kindLine = kind ? `Type: ${kind}\n` : "";
@@ -94,6 +97,10 @@ function buildTelegramMessage(
   } else {
     parts.push("Tx: —");
   }
+  if (input && input !== "0x") {
+    const truncated = input.length > 66 ? input.slice(0, 66) + "…" : input;
+    parts.push(`Input: <code>${escapeHtml(truncated)}</code>`);
+  }
   return parts.join("\n");
 }
 
@@ -108,14 +115,14 @@ function getTargetMethodSelectors(target: { type: string; methodSelectors?: unkn
   return [...set];
 }
 
-function addrEq(a: string | undefined, b: string | undefined): boolean {
-  if (!a || !b) return false;
+function addrEq(a: string | undefined, b: unknown): boolean {
+  if (!a || typeof b !== "string") return false;
   return a.toLowerCase() === b.toLowerCase();
 }
 
-function inList(addr: string | undefined, list: string[] | undefined): boolean {
+function inList(addr: string | undefined, list: unknown[] | undefined): boolean {
   if (!addr || !list?.length) return !list?.length; // 空 list 表示“任意”
-  return list.some((x) => addrEq(addr, x));
+  return list.some((x) => typeof x === "string" && addrEq(addr, x));
 }
 
 /** 区分规则：log 对应 config 里哪个 events 条目（地址 + topic 匹配），返回命中的 target，用其 label 报警 */
@@ -173,17 +180,18 @@ function getTxHashFromItem(
 }
 
 /** 按规则匹配：每条 log/tx/trace 与给定 target 列表匹配，命中则用该条目的 label 报警；targetsOverride 为空则用 config.targets（多组时传入该组 targets） */
-function alertByTargetMatch(
+async function alertByTargetMatch(
   config: Config,
   block: NonNullable<AlchemyWebhookEvent["event"]["data"]>["block"],
   getTxHashFallback: () => string | null,
   targetsOverride?: MonitorTarget[]
-): void {
+): Promise<void> {
   const base = targetsOverride ?? config.targets;
   const eventTargets = base.filter((t) => t.type === "events") as MonitorTarget[];
   const txTargets = base.filter((t) => t.type === "transactions") as MonitorTarget[];
   const internalTargets = base.filter((t) => t.type === "internal_calls") as MonitorTarget[];
-  const blockTx0 = block?.transactions?.[0] as { hash?: string } | undefined;
+  const tx0 = block?.transactions?.[0];
+  const blockTx0 = typeof tx0 === "string" ? { hash: tx0 } : (tx0 as { hash?: string } | undefined);
 
   // 有 log 时：看 log 对应 config 里哪个 events 条目，用该条目的 label
   const logs = block?.logs ?? [];
@@ -210,17 +218,42 @@ function alertByTargetMatch(
   }
 
   // method 命中（internal call）时：看 trace 对应 config 里哪个 internal_calls 条目，用该条目的 label
+  // parent tx 获取顺序：1) trace.transaction 2) Explorer API 3) RPC debug_trace 4) 单 tx 区块启发式 5) fallback
   const traces = block?.callTracerTraces ?? [];
-  for (const trace of traces) {
+  let traceToTxMap = new Map<number, string>();
+  const blockNum = parseBlockNumber(block?.number);
+  const tracePayload = traces as Array<{ from?: { address?: string }; to?: { address?: string }; input?: string }>;
+
+  if (traces.length > 0 && blockNum != null) {
+    traceToTxMap = await getTraceToTxMapFromExplorer(config.network, blockNum, tracePayload);
+    if (traceToTxMap.size < traces.length) {
+      const rpcUrl = getRpcUrl(config.network);
+      if (rpcUrl) {
+        try {
+          const rpcMap = await getTraceToTxMap(rpcUrl, blockNum, tracePayload);
+          for (const [k, v] of rpcMap) {
+            if (!traceToTxMap.has(k)) traceToTxMap.set(k, v);
+          }
+        } catch {
+          // 忽略 RPC 失败
+        }
+      }
+    }
+  }
+  for (let i = 0; i < traces.length; i++) {
+    const trace = traces[i]!;
     const matched = matchTraceToTargets(
       trace as { from?: { address?: string }; to?: { address?: string }; input?: string },
       internalTargets
     );
-    const txHash = getTxHashFromItem(trace as { transaction?: { hash?: string }; transactionHash?: string }, blockTx0) ?? getTxHashFallback();
+    const txHash =
+      traceToTxMap.get(i) ??
+      getTxHashFromItem(trace as { transaction?: { hash?: string }; transactionHash?: string }, blockTx0);
+    const inp = (trace as { input?: string }).input ?? "";
     for (const t of matched) {
       const label = t.label ?? "Monitor";
       const network = t.network ?? config.network;
-      sendTelegram(buildTelegramMessage(network, txHash, label, "internal_call")).catch(() => {});
+      sendTelegram(buildTelegramMessage(network, txHash, label, "internal_call", inp)).catch(() => {});
     }
   }
 }
@@ -233,11 +266,11 @@ export function createEventHandler(
 ): (event: AlchemyWebhookEvent, matchedTarget?: MonitorTarget, matchedGroup?: WebhookGroup) => void {
   const methodSelectors = getMethodSelectors(config);
 
-  return function eventHandler(
+  return async function eventHandler(
     event: AlchemyWebhookEvent,
     matchedTarget?: MonitorTarget,
     matchedGroup?: WebhookGroup
-  ): void {
+  ): Promise<void> {
     const block = event?.event?.data?.block;
     let traces = block?.callTracerTraces;
     const targetSelectors = matchedTarget ? getTargetMethodSelectors(matchedTarget) : methodSelectors;
@@ -268,11 +301,11 @@ export function createEventHandler(
       }
     } else if (matchedGroup?.targets?.length) {
       // 多组模式：已按 signing_key 分流到该组，只在该组内按规则匹配报警
-      alertByTargetMatch(config, block, () => getTxHash(event), matchedGroup.targets);
+      await alertByTargetMatch(config, block, () => getTxHash(event), matchedGroup.targets);
     } else {
       // 单 Webhook 模式或仅用 env key 校验：将 payload 与 config.targets 做多维匹配，按 target 分别报警
       if (block && config.targets.length > 0) {
-        alertByTargetMatch(config, block, () => getTxHash(event));
+        await alertByTargetMatch(config, block, () => getTxHash(event));
       }
     }
   };

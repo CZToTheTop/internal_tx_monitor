@@ -78,6 +78,7 @@ export function createServer(options: ServerOptions): express.Express {
       }
       res.status(200).send("OK");
     } catch (err) {
+      console.error("[webhook] 处理异常:", err instanceof Error ? err.stack : err);
       res.status(500).send("Internal error");
     }
   });

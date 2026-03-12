@@ -11,25 +11,34 @@
     "setup": "tsx src/setup.ts",
     "monitor": "tsx src/index.ts",
     "test:tx": "tsx src/test-tx.ts",
+    "test:tx:webhook": "tsx scripts/test-tx-webhook.ts",
     "test:webhook": "bash scripts/test-webhook.sh",
     "test:webhook:local": "tsx scripts/test-webhook-signed.ts",
+    "test": "vitest run",
     "poll": "tsx src/poll.ts",
     "setup:guide": "tsx scripts/setup-webhook-guide.ts"
   },
-  "keywords": ["alchemy", "blockchain", "webhook", "monitor", "internal-calls"],
+  "keywords": [
+    "alchemy",
+    "blockchain",
+    "webhook",
+    "monitor",
+    "internal-calls"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "express": "^4.21.0",
     "dotenv": "^16.4.5",
+    "express": "^4.21.0",
     "yaml": "^2.3.4"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^22.9.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^3.2.4"
   }
 }
