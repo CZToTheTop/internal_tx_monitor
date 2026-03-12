@@ -106,7 +106,6 @@ export function buildInternalCallsQuery(target: MonitorTarget): string {
       revertReason
       subtraceCount
       traceAddressPath
-      transaction { hash }
     }
   }
 }
@@ -207,7 +206,6 @@ export function buildMergedQuery(config: Config): string {
       "    revertReason",
       "    subtraceCount",
       "    traceAddressPath",
-      "    transaction { hash }",
       "  }"
     );
   }
