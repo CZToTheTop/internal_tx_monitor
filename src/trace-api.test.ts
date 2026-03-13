@@ -2,32 +2,37 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { getRpcUrl, getTraceToTxMap } from "./trace-api.js";
 
 describe("getRpcUrl", () => {
-  let origRpc: string | undefined;
+  let origBnb: string | undefined;
+  let origEth: string | undefined;
   let origKey: string | undefined;
 
   beforeEach(() => {
-    origRpc = process.env.RPC_URL;
+    origBnb = process.env.BNB_RPC;
+    origEth = process.env.ETH_RPC;
     origKey = process.env.ALCHEMY_API_KEY;
   });
   afterEach(() => {
-    process.env.RPC_URL = origRpc;
+    process.env.BNB_RPC = origBnb;
+    process.env.ETH_RPC = origEth;
     process.env.ALCHEMY_API_KEY = origKey;
   });
 
-  it("returns RPC_URL when set", () => {
-    process.env.RPC_URL = "https://rpc.example.com";
-    process.env.ALCHEMY_API_KEY = "";
-    expect(getRpcUrl()).toBe("https://rpc.example.com");
-  });
-  it("derives from ALCHEMY_API_KEY + network", () => {
-    process.env.RPC_URL = "";
+  it("returns base + ALCHEMY_API_KEY when no custom RPC", () => {
+    delete process.env.BNB_RPC;
     process.env.ALCHEMY_API_KEY = "key123";
     expect(getRpcUrl("BNB_MAINNET")).toBe("https://bnb-mainnet.g.alchemy.com/v2/key123");
   });
-  it("returns empty when neither set", () => {
-    process.env.RPC_URL = "";
-    process.env.ALCHEMY_API_KEY = "";
+  it("returns custom full URL when BNB_RPC set without trailing slash", () => {
+    process.env.BNB_RPC = "https://bnb.example.com/v2/abc";
+    expect(getRpcUrl("BNB_MAINNET")).toBe("https://bnb.example.com/v2/abc");
+  });
+  it("returns empty when no key and no custom RPC", () => {
+    delete process.env.ETH_RPC;
+    delete process.env.ALCHEMY_API_KEY;
     expect(getRpcUrl("ETH_MAINNET")).toBe("");
+  });
+  it("returns empty when network unknown", () => {
+    expect(getRpcUrl("UNKNOWN")).toBe("");
   });
 });
 

@@ -11,6 +11,7 @@
     "setup": "tsx src/setup.ts",
     "monitor": "tsx src/index.ts",
     "test:tx": "tsx src/test-tx.ts",
+    "test:decode": "tsx scripts/test-decode.ts",
     "test:tx:webhook": "tsx scripts/test-tx-webhook.ts",
     "test:webhook": "bash scripts/test-webhook.sh",
     "test:webhook:local": "tsx scripts/test-webhook-signed.ts",
@@ -31,6 +32,8 @@
   },
   "dependencies": {
     "dotenv": "^16.4.5",
+    "ethers": "^6.16.0",
+    "undici": "^7.0.0",
     "express": "^4.21.0",
     "yaml": "^2.3.4"
   },

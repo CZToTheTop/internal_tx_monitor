@@ -32,14 +32,9 @@ const RPC_FALLBACK: Record<string, string> = {
 
 async function main() {
   const config = process.env.CONFIG_PATH ? loadConfig(process.env.CONFIG_PATH) : loadConfig();
-  const rpcUrl =
-    getRpcUrl(config.network) ||
-    process.env.RPC_URL ||
-    process.env.BSC_RPC_URL ||
-    process.env.ALCHEMY_BSC_URL ||
-    RPC_FALLBACK[config.network];
+  const rpcUrl = getRpcUrl(config.network) || RPC_FALLBACK[config.network];
   if (!rpcUrl) {
-    console.error("请设置 RPC_URL、ALCHEMY_API_KEY 或 BSC_RPC_URL");
+    console.error("请设置 ALCHEMY_API_KEY 或对应链的完整 RPC URL");
     process.exit(1);
   }
 

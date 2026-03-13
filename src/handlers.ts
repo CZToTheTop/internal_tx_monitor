@@ -3,6 +3,13 @@ import type { AlchemyWebhookEvent } from "./webhook-util.js";
 import { sendTelegram, getExplorerBase } from "./telegram.js";
 import { getTraceToTxMapFromExplorer } from "./explorer-api.js";
 import { getRpcUrl, getTraceToTxMap } from "./trace-api.js";
+import {
+  decodeInput,
+  formatDecodedInput,
+  getAbiFromExplorer,
+  loadAbiFromFile,
+  type DecodedInput,
+} from "./abi-decoder.js";
 
 function normSelector(s: unknown): string | null {
   const str = Array.isArray(s) ? s[0] : s;
@@ -75,13 +82,14 @@ function getTxHash(event: AlchemyWebhookEvent): string | null {
   return null;
 }
 
-/** 构建 TG 通知（英文）：label、network、tx hash 与 explorer 链接；internal_call 可带 input */
+/** 构建 TG 通知（英文）：label、network、tx hash 与 explorer 链接；internal_call 可带 input 或 decoded params */
 function buildTelegramMessage(
   network: string,
   txHash: string | null,
   label: string,
   kind?: "log" | "tx" | "internal_call",
-  input?: string
+  input?: string,
+  decodedInput?: DecodedInput | null
 ): string {
   const base = getExplorerBase(network);
   const kindLine = kind ? `Type: ${kind}\n` : "";
@@ -97,9 +105,10 @@ function buildTelegramMessage(
   } else {
     parts.push("Tx: —");
   }
-  if (input && input !== "0x") {
-    const truncated = input.length > 66 ? input.slice(0, 66) + "…" : input;
-    parts.push(`Input: <code>${escapeHtml(truncated)}</code>`);
+  if (decodedInput) {
+    parts.push(`Input: <code>${escapeHtml(formatDecodedInput(decodedInput))}</code>`);
+  } else if (input && input !== "0x") {
+    parts.push(`Input: <code>${escapeHtml(input)}</code>`);
   }
   return parts.join("\n");
 }
@@ -250,10 +259,18 @@ async function alertByTargetMatch(
       traceToTxMap.get(i) ??
       getTxHashFromItem(trace as { transaction?: { hash?: string }; transactionHash?: string }, blockTx0);
     const inp = (trace as { input?: string }).input ?? "";
+    const toAddr = (trace as { to?: { address?: string } }).to?.address;
     for (const t of matched) {
       const label = t.label ?? "Monitor";
       const network = t.network ?? config.network;
-      sendTelegram(buildTelegramMessage(network, txHash, label, "internal_call", inp)).catch(() => {});
+      let decoded: DecodedInput | null = null;
+      const abi =
+        t.abi?.length ? t.abi : t.abiPath ? loadAbiFromFile(t.abiPath) : null;
+      const abiResolved = abi ?? (toAddr ? await getAbiFromExplorer(toAddr, network) : null);
+      if (abiResolved?.length && inp) decoded = decodeInput(abiResolved, inp);
+      sendTelegram(
+        buildTelegramMessage(network, txHash, label, "internal_call", inp, decoded)
+      ).catch(() => {});
     }
   }
 }

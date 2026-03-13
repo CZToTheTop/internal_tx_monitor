@@ -53,4 +53,7 @@ targets:
       - "0x55d398326f99059fF775485246999027B3197955"
     methodSelectors:
       - "0xa9059cbb"                    # transfer(address,uint256)
+    # 可选：用于 decode input 参数；不配则尝试从 Explorer API 拉取 to 合约 ABI
+    # abiPath: abis/usdt.json          # 相对项目根的 ABI 文件路径
+    # abi: [ { type: "function", name: "transfer", inputs: [...] } ]  # 或内联 ABI
     # network: BNB_MAINNET

@@ -23,6 +23,10 @@ export interface MonitorTarget {
   toAddresses?: string[];
   /** 仅 internal_calls: 按 method selector 过滤（input 前 4 字节），如 transfer 为 0xa9059cbb；配置后仅 input 匹配的 internal call 会触发报警 */
   methodSelectors?: string[];
+  /** 仅 internal_calls: 内联 ABI，用于 decode input 参数；与 abiPath 二选一 */
+  abi?: object[];
+  /** 仅 internal_calls: ABI 文件路径（相对项目根），用于 decode input；与 abi 二选一；不配则尝试从 Explorer API 拉取 to 合约 ABI */
+  abiPath?: string;
   /** 仅 transactions: 过滤 from 地址 */
   txFrom?: string[];
   /** 仅 transactions: 过滤 to 地址 */

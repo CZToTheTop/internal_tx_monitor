@@ -4,3 +4,4 @@ dist/
 config.yaml
 *.log
 tmp-test-config/
+.abi-cache/

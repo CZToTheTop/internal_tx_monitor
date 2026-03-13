@@ -1,31 +1,48 @@
 /**
  * 通过 debug_traceBlockByNumber 获取 internal trace 对应的 parent external tx hash
- * RPC 来源：RPC_URL 环境变量，或从 ALCHEMY_API_KEY + network 推导
+ * RPC 来源：各链 base URL + ALCHEMY_API_KEY；或完整 ETH_RPC、BNB_RPC 等覆盖
  */
 
-const NETWORK_TO_ALCHEMY: Record<string, string> = {
-  ETH_MAINNET: "eth-mainnet",
-  ETH_SEPOLIA: "eth-sepolia",
-  BNB_MAINNET: "bnb-mainnet",
-  BNB_TESTNET: "bnb-testnet",
-  MATIC_MAINNET: "polygon-mainnet",
-  MATIC_AMOY: "polygon-amoy",
-  ARB_MAINNET: "arb-mainnet",
-  ARB_SEPOLIA: "arb-sepolia",
-  OP_MAINNET: "optimism-mainnet",
-  OP_SEPOLIA: "optimism-sepolia",
-  BASE_MAINNET: "base-mainnet",
-  BASE_SEPOLIA: "base-sepolia",
+const RPC_BASE: Record<string, string> = {
+  ETH_MAINNET: "https://eth-mainnet.g.alchemy.com/v2/",
+  ETH_SEPOLIA: "https://eth-sepolia.g.alchemy.com/v2/",
+  BNB_MAINNET: "https://bnb-mainnet.g.alchemy.com/v2/",
+  BNB_TESTNET: "https://bnb-testnet.g.alchemy.com/v2/",
+  MATIC_MAINNET: "https://polygon-mainnet.g.alchemy.com/v2/",
+  MATIC_AMOY: "https://polygon-amoy.g.alchemy.com/v2/",
+  ARB_MAINNET: "https://arb-mainnet.g.alchemy.com/v2/",
+  ARB_SEPOLIA: "https://arb-sepolia.g.alchemy.com/v2/",
+  OP_MAINNET: "https://opt-mainnet.g.alchemy.com/v2/",
+  OP_SEPOLIA: "https://opt-sepolia.g.alchemy.com/v2/",
+  BASE_MAINNET: "https://base-mainnet.g.alchemy.com/v2/",
+  BASE_SEPOLIA: "https://base-sepolia.g.alchemy.com/v2/",
 };
 
-/** 获取 RPC URL：优先 RPC_URL，否则从 ALCHEMY_API_KEY + network 推导 */
+const NETWORK_TO_RPC_ENV: Record<string, string> = {
+  ETH_MAINNET: "ETH_RPC",
+  ETH_SEPOLIA: "ETH_SEPOLIA_RPC",
+  BNB_MAINNET: "BNB_RPC",
+  BNB_TESTNET: "BNB_TESTNET_RPC",
+  MATIC_MAINNET: "MATIC_RPC",
+  MATIC_AMOY: "MATIC_AMOY_RPC",
+  ARB_MAINNET: "ARB_RPC",
+  ARB_SEPOLIA: "ARB_SEPOLIA_RPC",
+  OP_MAINNET: "OP_RPC",
+  OP_SEPOLIA: "OP_SEPOLIA_RPC",
+  BASE_MAINNET: "BASE_RPC",
+  BASE_SEPOLIA: "BASE_SEPOLIA_RPC",
+};
+
+/** 获取 RPC URL：优先链专属完整 URL；否则用 base + ALCHEMY_API_KEY */
 export function getRpcUrl(network?: string): string {
-  const url = process.env.RPC_URL?.trim();
-  if (url) return url;
+  if (!network) return "";
+  const envKey = NETWORK_TO_RPC_ENV[network];
+  const custom = envKey ? process.env[envKey]?.trim() : "";
+  if (custom && !custom.endsWith("/")) return custom;
+  const base = RPC_BASE[network];
   const key = process.env.ALCHEMY_API_KEY?.trim();
-  const sub = network ? NETWORK_TO_ALCHEMY[network] : null;
-  if (key && sub) return `https://${sub}.g.alchemy.com/v2/${key}`;
-  return "";
+  if (!base || !key) return custom || "";
+  return (custom || base) + key;
 }
 
 type TraceFrame = {
