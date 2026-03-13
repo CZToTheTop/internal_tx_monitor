@@ -5,7 +5,7 @@
  * 代理：设置 HTTPS_PROXY 或 HTTP_PROXY 环境变量后，请求会走代理
  */
 
-import { Interface } from "ethers";
+import { Interface, type InterfaceAbi } from "ethers";
 import { fetch as undiciFetch, EnvHttpProxyAgent } from "undici";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { resolve } from "path";
@@ -296,7 +296,7 @@ export type DecodedInput = {
 export function decodeInput(abi: object[], input: string): DecodedInput | null {
   if (!input || input === "0x" || input.length < 10) return null;
   try {
-    const iface = new Interface(abi as Parameters<typeof Interface.from>[0]);
+    const iface = new Interface(abi as InterfaceAbi);
     const decoded = iface.parseTransaction({ data: input });
     if (!decoded) return null;
     const args: Record<string, unknown> = {};
