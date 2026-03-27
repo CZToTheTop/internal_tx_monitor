@@ -57,3 +57,36 @@ targets:
     # abiPath: abis/usdt.json          # 相对项目根的 ABI 文件路径
     # abi: [ { type: "function", name: "transfer", inputs: [...] } ]  # 或内联 ABI
     # network: BNB_MAINNET
+
+    # 可选：细粒度规则示例（命中该 target 后再按规则检查）
+    # rules:
+    #   - name: "disallow-unknown-role"
+    #     when:
+    #       function: "revokeRole(bytes32,address)"   # 仅在该函数被调用时检查
+    #     checks:
+    #       - type: paramIn
+    #         argIndex: 0
+    #         allowed:
+    #           - "0x<ROLE_HASH_1>"
+    #           - "0x<ROLE_HASH_2>"
+    #
+    #   - name: "price-should-be-0-1-5"
+    #     when:
+    #       function: "changePrice(int256)"
+    #     checks:
+    #       - type: paramIn
+    #         argIndex: 0
+    #         allowed: [0, 1, 5]
+    #
+    #   - name: "vault-balance-lower-bound"
+    #     checks:
+    #       - type: balanceInRange
+    #         addressRef: target          # 检查目标合约自身余额
+    #         token: native               # 链原生币
+    #         min: "1000000000000000000"  # 1 ETH（以最小单位表示）
+    #
+    #   - name: "config-slot-must-be-expected"
+    #     checks:
+    #       - type: storageSlotEquals
+    #         slot: "0x0"
+    #         expected: "0x0000000000000000000000000000000000000000000000000000000000000001"

@@ -5,6 +5,100 @@ import { resolve } from "path";
 /** 监控目标类型 */
 export type MonitorType = "events" | "transactions" | "internal_calls";
 
+/** 单条规则的触发条件（在 target 命中之后的二级过滤） */
+export interface RuleWhen {
+  /** 函数名称或完整签名，如 `revokeRole(bytes32,address)`；仅对 transactions/internal_calls 有意义 */
+  function?: string;
+  /** 事件名称或完整签名，如 `Transfer(address,address,uint256)`；仅对 events 有意义 */
+  event?: string;
+}
+
+/** 规则检查类型（后续在 rules-engine 中具体实现） */
+export type RuleCheck =
+  | {
+      /** 检查 decoded 参数是否在允许集合内（白名单） */
+      type: "paramIn";
+      /** 第几个参数（0-based） */
+      argIndex: number;
+      /** 允许的取值列表，字符串或数字，具体比较逻辑由规则引擎实现 */
+      allowed: unknown[];
+    }
+  | {
+      /** 原生币 / ERC20 余额区间检查 */
+      type: "balanceInRange";
+      /**
+       * 要检查余额的地址（直接写死），与 addressRef 二选一；
+       * 如不填写则由规则引擎按上下文推断（通常为 target 合约地址）
+       */
+      address?: string;
+      /**
+       * 从上下文取地址的引用：tx.to / tx.from / target 等；
+       * 仅用于简化配置，不做强约束，具体含义由规则引擎解释
+       */
+      addressRef?: "tx.to" | "tx.from" | "target";
+      /**
+       * token 标识：
+       * - "native" 表示链原生币
+       * - 其他字符串可由规则引擎解释为 token 合约地址
+       */
+      token?: string;
+      /** 最小值（含），支持数字或字符串（由规则引擎做单位换算与精度处理） */
+      min?: string | number;
+      /** 最大值（含），支持数字或字符串 */
+      max?: string | number;
+    }
+  | {
+      /** 固定 storage slot 比较 */
+      type: "storageSlotEquals";
+      /** storage slot（十六进制字符串） */
+      slot: string;
+      /** 预期值（十六进制字符串），比较逻辑由规则引擎实现 */
+      expected: string;
+    }
+  | {
+      /** 调用者不在白名单时告警（caller = tx.from 或 trace.from） */
+      type: "callerNotIn";
+      /** 允许的 caller 地址列表；空数组表示不告警 */
+      allowed: string[];
+    }
+  | {
+      /** 参数超出数值区间时告警（用于 feeBips、amount 等） */
+      type: "paramOutsideRange";
+      /** 第几个参数（0-based） */
+      argIndex: number;
+      /** 最小值（含），不填则不这下界 */
+      min?: string | number;
+      /** 最大值（含），不填则不设上界 */
+      max?: string | number;
+    };
+
+/** 单条规则配置：由 target 派生出的细粒度监控规则 */
+export interface RuleConfig {
+  /** 规则名（可选），用于日志与报警展示 */
+  name?: string;
+  /** 规则说明，用于报警文案补充 */
+  description?: string;
+  /** 告警严重级别，仅用于展示，不影响执行 */
+  severity?: "info" | "low" | "medium" | "high" | "critical";
+  /**
+   * 规则模式：
+   * - filter：默认模式，仅当规则命中时才发送报警
+   * - annotate：规则仅增加附加信息，不改变是否报警的决策
+   */
+  mode?: "filter" | "annotate";
+  /** 触发条件：在 target 命中之后进一步过滤具体函数/事件/参数 */
+  when?: RuleWhen;
+  /** 具体检查列表（与 handler 二选一或组合） */
+  checks?: RuleCheck[];
+  /**
+   * 自定义 handler 名称：由代码侧注册，实现复杂逻辑；
+   * 若存在，则由规则引擎优先调用对应 handler
+   */
+  handler?: string;
+  /** 自定义 handler 的可选参数（如 threshold、scale 等），由 handler 自行解析 */
+  params?: Record<string, unknown>;
+}
+
 /** 单个监控目标配置 */
 export interface MonitorTarget {
   /** 监控类型: events=合约事件, transactions=外部交易, internal_calls=内部调用(含 call/delegatecall) */
@@ -33,6 +127,8 @@ export interface MonitorTarget {
   txTo?: string[];
   /** 可选标签，用于日志区分 */
   label?: string;
+  /** 可选：该 target 下的细粒度规则列表；为空或省略时保留“命中即报警”的旧行为 */
+  rules?: RuleConfig[];
 }
 
 /** 一个 signing_key 对应的一组规则（收到 event 后先按 signing_key 分流，再在该组内按规则匹配） */
@@ -142,6 +238,10 @@ export function loadConfig(path?: string): Config {
 
   for (const t of targets) {
     if (t.network) t.network = NETWORK_MAP[t.network] ?? t.network;
+    // 对 rules 做最小 shape 校验：若存在则必须为数组
+    if (t.rules != null && !Array.isArray(t.rules)) {
+      throw new Error("config.yaml: target.rules 必须为数组");
+    }
   }
 
   return {

@@ -317,3 +317,25 @@ export function formatDecodedInput(d: DecodedInput): string {
     .map(([k, v]) => `${k}=${String(v)}`);
   return `${d.name}(${parts.join(", ")})`;
 }
+
+/** 解码事件 log：topics[0]=selector, topics[1..]=indexed, data=non-indexed；返回事件名与参数数组（按 ABI 顺序） */
+export function decodeLog(
+  abi: object[],
+  topics: string[],
+  data: string
+): { name: string; args: unknown[] } | null {
+  if (!topics?.length || !topics[0]) return null;
+  try {
+    const iface = new Interface(abi as InterfaceAbi);
+    const parsed = iface.parseLog({ topics: topics as string[], data: data ?? "0x" });
+    if (!parsed) return null;
+    const args: unknown[] = [];
+    parsed.fragment.inputs.forEach((_param, i) => {
+      const v = parsed.args[i];
+      args.push(v !== undefined ? (typeof v === "bigint" ? v.toString() : v) : undefined);
+    });
+    return { name: parsed.name, args };
+  } catch {
+    return null;
+  }
+}

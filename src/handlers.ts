@@ -5,11 +5,13 @@ import { getTraceToTxMapFromExplorer } from "./explorer-api.js";
 import { getRpcUrl, getTraceToTxMap } from "./trace-api.js";
 import {
   decodeInput,
+  decodeLog,
   formatDecodedInput,
   getAbiFromExplorer,
   loadAbiFromFile,
   type DecodedInput,
 } from "./abi-decoder.js";
+import { runRules, type MonitorContext } from "./rules-engine.js";
 
 function normSelector(s: unknown): string | null {
   const str = Array.isArray(s) ? s[0] : s;
@@ -89,7 +91,8 @@ function buildTelegramMessage(
   label: string,
   kind?: "log" | "tx" | "internal_call",
   input?: string,
-  decodedInput?: DecodedInput | null
+  decodedInput?: DecodedInput | null,
+  ruleInfo?: string
 ): string {
   const base = getExplorerBase(network);
   const kindLine = kind ? `Type: ${kind}\n` : "";
@@ -109,6 +112,9 @@ function buildTelegramMessage(
     parts.push(`Input: <code>${escapeHtml(formatDecodedInput(decodedInput))}</code>`);
   } else if (input && input !== "0x") {
     parts.push(`Input: <code>${escapeHtml(input)}</code>`);
+  }
+  if (ruleInfo) {
+    parts.push(`Rule: <code>${escapeHtml(ruleInfo)}</code>`);
   }
   return parts.join("\n");
 }
@@ -188,6 +194,24 @@ function getTxHashFromItem(
   return normalizeTxHash(h);
 }
 
+/** 构造规则引擎上下文的基础信息 */
+function buildBaseContext(
+  kind: MonitorContext["kind"],
+  network: string,
+  block: NonNullable<AlchemyWebhookEvent["event"]["data"]>["block"],
+  target: MonitorTarget,
+  txHash: string | null
+): Pick<MonitorContext, "kind" | "network" | "blockNumber" | "txHash" | "target"> {
+  const blockNumber = parseBlockNumber(block?.number);
+  return {
+    kind,
+    network,
+    blockNumber: blockNumber ?? undefined,
+    txHash,
+    target,
+  };
+}
+
 /** 按规则匹配：每条 log/tx/trace 与给定 target 列表匹配，命中则用该条目的 label 报警；targetsOverride 为空则用 config.targets（多组时传入该组 targets） */
 async function alertByTargetMatch(
   config: Config,
@@ -207,10 +231,53 @@ async function alertByTargetMatch(
   for (const log of logs) {
     const matched = matchLogToTargets(log as { account?: { address?: string }; topics?: string[] }, eventTargets);
     const txHash = getTxHashFromItem(log as { transaction?: { hash?: string } }, blockTx0) ?? getTxHashFallback();
+    const logObj = log as {
+      account?: { address?: string };
+      topics?: string[];
+      data?: string;
+      transaction?: { hash?: string; from?: { address?: string } };
+    };
     for (const t of matched) {
       const label = t.label ?? "Monitor";
       const network = t.network ?? config.network;
-      sendTelegram(buildTelegramMessage(network, txHash, label, "log")).catch(() => {});
+      if (!t.rules?.length) {
+        // 兼容旧行为：未配置 rules 时，命中即报警
+        sendTelegram(buildTelegramMessage(network, txHash, label, "log")).catch(() => {});
+        continue;
+      }
+
+      let ctx: MonitorContext = {
+        ...buildBaseContext("log", network, block, t, txHash),
+        log,
+        caller: logObj.transaction?.from?.address,
+      };
+      const topics = logObj.topics ?? [];
+      if (topics.length > 0) {
+        const addr = logObj.account?.address;
+        const abi = t.abi?.length ? t.abi : t.abiPath ? loadAbiFromFile(t.abiPath) : null;
+        const abiResolved = abi ?? (addr ? await getAbiFromExplorer(addr, network) : null);
+        if (abiResolved?.length) {
+          const decodedEv = decodeLog(abiResolved, topics, logObj.data ?? "0x");
+          if (decodedEv) {
+            ctx = { ...ctx, args: decodedEv.args, eventName: decodedEv.name, eventSignature: decodedEv.name };
+          }
+        }
+        if (!ctx.caller && txHash && Array.isArray(block?.transactions)) {
+          const txWithFrom = block.transactions.find(
+            (x) => (typeof x === "object" && (x as { hash?: string }).hash === txHash) || x === txHash
+          ) as { from?: { address?: string } } | undefined;
+          if (txWithFrom?.from?.address) ctx = { ...ctx, caller: txWithFrom.from.address };
+        }
+      }
+      const ruleResults = await runRules(ctx, t.rules);
+      if (ruleResults.length > 0) {
+        const first = ruleResults[0]!;
+        const ruleInfo =
+          (first.rule.name ?? "rule") + (first.reason ? `: ${first.reason}` : "");
+        sendTelegram(buildTelegramMessage(network, txHash, label, "log", undefined, undefined, ruleInfo)).catch(
+          () => {}
+        );
+      }
     }
   }
 
@@ -222,7 +289,26 @@ async function alertByTargetMatch(
     for (const t of matched) {
       const label = t.label ?? "Monitor";
       const network = t.network ?? config.network;
-      sendTelegram(buildTelegramMessage(network, txHash, label, "tx")).catch(() => {});
+      if (!t.rules?.length) {
+        sendTelegram(buildTelegramMessage(network, txHash, label, "tx")).catch(() => {});
+        continue;
+      }
+
+      const txObj = tx as { from?: { address?: string } };
+      const ctx: MonitorContext = {
+        ...buildBaseContext("tx", network, block, t, txHash),
+        tx,
+        caller: txObj?.from?.address,
+      };
+      const ruleResults = await runRules(ctx, t.rules);
+      if (ruleResults.length > 0) {
+        const first = ruleResults[0]!;
+        const ruleInfo =
+          (first.rule.name ?? "rule") + (first.reason ? `: ${first.reason}` : "");
+        sendTelegram(buildTelegramMessage(network, txHash, label, "tx", undefined, undefined, ruleInfo)).catch(
+          () => {}
+        );
+      }
     }
   }
 
@@ -268,9 +354,34 @@ async function alertByTargetMatch(
         t.abi?.length ? t.abi : t.abiPath ? loadAbiFromFile(t.abiPath) : null;
       const abiResolved = abi ?? (toAddr ? await getAbiFromExplorer(toAddr, network) : null);
       if (abiResolved?.length && inp) decoded = decodeInput(abiResolved, inp);
-      sendTelegram(
-        buildTelegramMessage(network, txHash, label, "internal_call", inp, decoded)
-      ).catch(() => {});
+
+      if (!t.rules?.length) {
+        // 未配置 rules：保持原有简单报警行为
+        sendTelegram(
+          buildTelegramMessage(network, txHash, label, "internal_call", inp, decoded)
+        ).catch(() => {});
+        continue;
+      }
+
+      const argsArray = decoded ? Object.values(decoded.args ?? {}) : [];
+      const traceObj = trace as { from?: { address?: string } };
+      const ctx: MonitorContext = {
+        ...buildBaseContext("internal_call", network, block, t, txHash),
+        trace,
+        args: argsArray,
+        functionName: decoded?.name,
+        functionSignature: decoded?.name,
+        caller: traceObj?.from?.address,
+      };
+      const ruleResults = await runRules(ctx, t.rules);
+      if (ruleResults.length > 0) {
+        const first = ruleResults[0]!;
+        const ruleInfo =
+          (first.rule.name ?? "rule") + (first.reason ? `: ${first.reason}` : "");
+        sendTelegram(
+          buildTelegramMessage(network, txHash, label, "internal_call", inp, decoded, ruleInfo)
+        ).catch(() => {});
+      }
     }
   }
 }
@@ -299,26 +410,18 @@ export function createEventHandler(
       });
     }
 
-    const logs = block?.logs?.length ?? 0;
-    const txs = block?.transactions?.length ?? 0;
-    const traceCount = traces?.length ?? block?.callTracerTraces?.length ?? 0;
-
     formatEvent(event, traces);
 
-    const network = matchedTarget?.network ?? config.network;
-    let shouldAlert: boolean;
     if (matchedTarget) {
-      if (matchedTarget.type === "events") shouldAlert = logs > 0;
-      else if (matchedTarget.type === "transactions") shouldAlert = txs > 0;
-      else shouldAlert = traceCount > 0; // internal_calls
-      if (shouldAlert) {
-        const txHash = getTxHash(event);
-        const label = matchedTarget.label ?? "Monitor";
-        sendTelegram(buildTelegramMessage(network, txHash, label)).catch(() => {});
+      // 单 target + signing_key 模式：按该 target 的规则匹配（含 rules 引擎）
+      if (block) {
+        await alertByTargetMatch(config, block, () => getTxHash(event), [matchedTarget]);
       }
     } else if (matchedGroup?.targets?.length) {
       // 多组模式：已按 signing_key 分流到该组，只在该组内按规则匹配报警
-      await alertByTargetMatch(config, block, () => getTxHash(event), matchedGroup.targets);
+      if (block) {
+        await alertByTargetMatch(config, block, () => getTxHash(event), matchedGroup.targets);
+      }
     } else {
       // 单 Webhook 模式或仅用 env key 校验：将 payload 与 config.targets 做多维匹配，按 target 分别报警
       if (block && config.targets.length > 0) {
