@@ -111,6 +111,31 @@ describe("matchLogToTargets", () => {
     );
     expect(r).toHaveLength(0);
   });
+  it("filters by topic1Equals (indexed role bytes32)", () => {
+    const role =
+      "0x97667070c54ef182b0f5858b034beac1b6f3089aa2d3188bb1e8929f4fa9b929";
+    const targets: MonitorTarget[] = [
+      {
+        type: "events",
+        addresses: ["0xaaa"],
+        topics: ["0xt0"],
+        topic1Equals: role,
+        label: "R",
+      },
+    ];
+    expect(
+      matchLogToTargets(
+        { account: { address: "0xaaa" }, topics: ["0xt0", role] },
+        targets
+      )
+    ).toHaveLength(1);
+    expect(
+      matchLogToTargets(
+        { account: { address: "0xaaa" }, topics: ["0xt0", "0x" + "11".repeat(32)] },
+        targets
+      )
+    ).toHaveLength(0);
+  });
 });
 
 describe("matchTxToTargets", () => {

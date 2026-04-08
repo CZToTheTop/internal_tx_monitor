@@ -7,7 +7,7 @@
 import "dotenv/config";
 import { createHmac } from "crypto";
 import http from "http";
-import { loadConfig } from "../src/config.js";
+import { loadConfigsFromEnv, mergeConfigsForPoll } from "../src/config.js";
 import { getTraceToTxMapFromExplorer } from "../src/explorer-api.js";
 import { getRpcUrl, getTraceToTxMap } from "../src/trace-api.js";
 
@@ -31,7 +31,7 @@ const RPC_FALLBACK: Record<string, string> = {
 };
 
 async function main() {
-  const config = process.env.CONFIG_PATH ? loadConfig(process.env.CONFIG_PATH) : loadConfig();
+  const config = mergeConfigsForPoll(loadConfigsFromEnv());
   const rpcUrl = getRpcUrl(config.network) || RPC_FALLBACK[config.network];
   if (!rpcUrl) {
     console.error("请设置 ALCHEMY_API_KEY 或对应链的完整 RPC URL");

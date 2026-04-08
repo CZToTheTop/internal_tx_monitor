@@ -9,6 +9,11 @@ export type MonitorType = "events" | "transactions" | "internal_calls";
 export interface RuleWhen {
   /** 函数名称或完整签名，如 `revokeRole(bytes32,address)`；仅对 transactions/internal_calls 有意义 */
   function?: string;
+  /**
+   * 多个函数名/签名，任一匹配即通过（OR）。
+   * 若与 `function` 同时配置：优先使用本列表（`functions` 非空时忽略单独的 `function`）。
+   */
+  functions?: string[];
   /** 事件名称或完整签名，如 `Transfer(address,address,uint256)`；仅对 events 有意义 */
   event?: string;
 }
@@ -58,8 +63,46 @@ export type RuleCheck =
   | {
       /** 调用者不在白名单时告警（caller = tx.from 或 trace.from） */
       type: "callerNotIn";
-      /** 允许的 caller 地址列表；空数组表示不告警 */
-      allowed: string[];
+      /**
+       * 静态白名单；可与 allowedFromCall 链上读取结果合并（去重、小写比较）。
+       * 与 allowedFromCall 至少配置其一；都缺省则视为空名单（任何 caller 都会触发告警）。
+       *
+       * **编写建议**：先读合约源码中该入口的权限（onlyAdmin、onlyRole、onlyOracle 等），再在已验证 ABI 中选
+       * 对应的 view/pure，通过 `allowedFromCall` 用 `returns: bool`（如 isAdmin、hasRole）或 `returns: addresses`
+       *（如 owner()、getOracle、白名单数组）对齐链上判定，避免空 `allowed` 凭感觉配规则。
+       */
+      allowed?: string[];
+      /**
+       * 从指定合约的 view/pure 方法读取地址或地址数组，作为动态白名单，与 allowed 合并。
+       * 需为该 network 配置 RPC（见 trace-api / 环境变量）。
+       */
+      allowedFromCall?: {
+        /** 合约地址 */
+        contract: string;
+        /**
+         * 人类可读函数签名，如
+         * `function getProposers() view returns (address[])` 或
+         * `function isProposerWhitelisted(address) view returns (bool)`（mapping 自动 getter）
+         * 或 `function isAdmin(address) view returns (bool)`（对齐 onlyAdmin）
+         */
+        signature: string;
+        /**
+         * 调用参数，默认 []。
+         * - `"$caller"`：当前 internal call / tx 的 caller（trace.from 或 tx.from）
+         * - `"$arg0"` / `"$arg1"` / …：当前已解码 calldata 的第 n 个参数（如 proposePriceFor 的第一个 address）
+         */
+        args?: unknown[];
+        /**
+         * `addresses`：返回值作为 address / address[] 白名单（默认）。
+         * `bool`：返回值为 true 时视为已白名单（适用于 mapping getter）。
+         */
+        returns?: "addresses" | "bool";
+        /**
+         * 动态列表缓存秒数，减轻 RPC；默认 60；设为 0 则每次 webhook 都拉取。
+         * 缓存键包含解析后的 args（含 `$caller` / `$argN` 替换结果）。
+         */
+        cacheSeconds?: number;
+      };
     }
   | {
       /** 参数超出数值区间时告警（用于 feeBips、amount 等） */
@@ -111,6 +154,11 @@ export interface MonitorTarget {
   signing_key?: string;
   /** 仅 events 类型: 事件 topic 过滤，空数组表示匹配所有事件 */
   topics?: string[];
+  /**
+   * 仅 events：若设置，则要求 topics[1]（首个 indexed，如 AccessControl 的 role）等于该 32 字节 hex。
+   * 例：OPERATOR_ROLE = keccak256("OPERATOR_ROLE")
+   */
+  topic1Equals?: string;
   /** 仅 internal_calls: 过滤 from 地址，空表示任意 */
   fromAddresses?: string[];
   /** 仅 internal_calls: 过滤 to 地址，空表示任意 */
@@ -145,6 +193,8 @@ export interface Config {
   targets: MonitorTarget[];
   /** Webhook 接收地址 (需公网可访问，如 ngrok) */
   webhookUrl: string;
+  /** 本配置来自哪个文件（loadConfig/loadConfigs 写入，便于日志） */
+  configPath?: string;
   /**
    * 单 Webhook 模式：整份 config 只创建 1 个 Alchemy Webhook，在服务端按 target 做多维度筛查并分别报警。
    * 此时 signing_key 应写在 targets 下（targets.signing_key），而非每个 target 的 type 后。
@@ -251,5 +301,58 @@ export function loadConfig(path?: string): Config {
     singleWebhook: parsed.singleWebhook as boolean | undefined,
     singleWebhookSigningKey,
     webhookGroups,
+    configPath: realPath,
+  };
+}
+
+/**
+ * 从环境变量解析要加载的 yaml 路径列表：
+ * - `CONFIG_PATHS`：逗号 / 分号 / 换行 分隔多个文件（不同项目方各一份规则）
+ * - 否则 `CONFIG_PATH` 单文件
+ * - 否则默认 `config.yaml`
+ */
+export function resolveConfigPathsFromEnv(): string[] {
+  const multi = process.env.CONFIG_PATHS?.trim();
+  if (multi) {
+    return multi
+      .split(/[\n,;]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  const single = process.env.CONFIG_PATH?.trim();
+  if (single) return [single];
+  return ["config.yaml"];
+}
+
+/** 加载多个 yaml，顺序与 `resolveConfigPathsFromEnv` 一致 */
+export function loadConfigs(paths?: string[]): Config[] {
+  const list = paths ?? resolveConfigPathsFromEnv();
+  return list.map((p) => loadConfig(p));
+}
+
+/** 默认入口：按环境变量加载全部配置 */
+export function loadConfigsFromEnv(): Config[] {
+  return loadConfigs(resolveConfigPathsFromEnv());
+}
+
+/**
+ * 轮询等场景：把多份配置的 targets 合并为一份（须同一 network）
+ */
+export function mergeConfigsForPoll(configs: Config[]): Config {
+  if (configs.length === 0) {
+    throw new Error("mergeConfigsForPoll: 至少一份配置");
+  }
+  if (configs.length === 1) {
+    return configs[0]!;
+  }
+  const nets = new Set(configs.map((c) => c.network));
+  if (nets.size > 1) {
+    throw new Error("多配置文件轮询时要求 network 一致");
+  }
+  const first = configs[0]!;
+  return {
+    ...first,
+    targets: configs.flatMap((c) => c.targets),
+    configPath: first.configPath,
   };
 }

@@ -1,0 +1,41 @@
+---
+description: 编写链上监控 config（YAML）时对齐合约权限与 ABI
+globs:
+  - "**/config*.yaml"
+  - "**/*.yaml"
+---
+
+# Monitor 规则编写要点
+
+## 0. 多项目 / 多文件
+
+- 用环境变量 **`CONFIG_PATHS`**（逗号/分号/换行分隔）加载多份 yaml；未设置时仍用 **`CONFIG_PATH`** 或默认 `config.yaml`。
+- 每个文件可有各自的 `webhookUrl`、`network`、`signing_key`；Alchemy 按 Signing Key 将请求路由到对应配置。
+- 细粒度规则仍在**各自 yaml** 的 `targets[].rules` 里维护；合并 GraphQL 只对链上过滤去重，规则不写入 GraphQL。
+
+## 1. 权限条件必须跟源码 + ABI，不要臆测
+
+- 在 BscScan 读**已验证源码**，确认每个被监控函数的修饰符：`onlyAdmin`、`onlyOwner`、`onlyRole(X)`、`onlyOracle` 等。
+- 在**同一套已验证 ABI** 中找到能表达「谁被允许」的 **view/pure**（或 public mapping 自动 getter），在 `checks.callerNotIn` 里用 **`allowedFromCall`** 复现链上判定。
+- **不要**长期依赖「`allowed: []` 且无 `allowedFromCall`」——那表示任意 caller 都视为不在白名单，只适合占位或刻意全报。
+
+## 2. `allowedFromCall` 常见对应关系
+
+| 源码修饰符 | 典型链上读法 | `returns` |
+|------------|----------------|-----------|
+| `onlyAdmin` / `admins` 映射 | `isAdmin(address)`、`admins(address)` | `bool` 或 `addresses` |
+| OpenZeppelin `AccessControl` | `hasRole(bytes32 role, address account)`，`DEFAULT_ADMIN_ROLE` 常为 `bytes32(0)` | `bool` |
+| `onlyOwner` | `owner()` | `addresses`（单地址展开成白名单） |
+| 按 market/question 的 oracle | `getOracle(bytes32)` + `args: ["$arg0"]` | `addresses` |
+| OO 提议者白名单 | `isProposerWhitelisted(address)` | `bool` |
+
+占位符：`$caller` = 当前 trace/tx 发送者；`$arg0`… = 当前已解码 calldata 参数（用于 `getOracle($arg0)` 等）。
+
+## 3. 事件 vs `callerNotIn`
+
+- `callerNotIn` 比较的是 **`caller`（通常为 tx.from）**，不是事件里 indexed 的 `oracle` 字段。
+- 若要告警「事件里的 oracle 字段不等于某值」或「caller 必须等于事件里的 oracle」，需要事件参数级检查或自定义 handler；单靠 `callerNotIn` 无法表达「与 log 内字段比较」。
+
+## 4. Selector / topic0
+
+- 函数 selector、事件 topic0 必须以 **Explorer 拉取的 ABI** 为准（本仓库可用 `getAbiFromExplorer` + `ETHERSCAN_API_KEY`）。

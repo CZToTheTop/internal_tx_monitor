@@ -290,6 +290,8 @@ export function loadAbiFromFile(path: string): object[] | null {
 export type DecodedInput = {
   name: string;
   args: Record<string, unknown>;
+  /** 完整函数签名，供规则 `when.function(s)` 与 ABI 一致匹配 */
+  signature?: string;
 };
 
 /** 用 ABI 解码 calldata，返回 functionName 和参数对象 */
@@ -304,7 +306,13 @@ export function decodeInput(abi: object[], input: string): DecodedInput | null {
       const v = decoded.args[i];
       args[param.name] = v !== undefined ? (typeof v === "bigint" ? v.toString() : v) : undefined;
     });
-    return { name: decoded.name, args };
+    let signature: string | undefined;
+    try {
+      signature = decoded.fragment.format("full");
+    } catch {
+      signature = undefined;
+    }
+    return { name: decoded.name, args, signature };
   } catch {
     return null;
   }

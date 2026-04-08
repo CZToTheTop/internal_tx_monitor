@@ -1,6 +1,13 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import type { Config, MonitorTarget, WebhookGroup } from "./config.js";
 
+/** 一次 Webhook 请求解析到的配置与分流结果（多 yaml 时用于选对那份 Config） */
+export interface WebhookDispatch {
+  config: Config;
+  matchedGroup?: WebhookGroup;
+  matchedTarget?: MonitorTarget;
+}
+
 /**
  * 验证 Alchemy Webhook 签名（使用 constant-time 比较防 timing attack）
  * @see https://docs.alchemy.com/reference/notify-api-quickstart#validate-the-signature-received
@@ -51,6 +58,48 @@ export function getGroupForSignature(
   for (const group of groups) {
     const key = group.signingKey?.trim();
     if (key && isValidSignature(body, signature, key)) return group;
+  }
+  return null;
+}
+
+/**
+ * 按签名在多个 Config 中依次匹配（顺序与 loadConfigs 一致）。
+ * 单 Config 时保留 `SIGNING_KEYS` 兜底：验签通过后视为命中该唯一配置、整表匹配。
+ * 多 Config 时不用 env 兜底，避免误路由到错误项目。
+ */
+export function resolveWebhookDispatch(
+  configs: Config[],
+  body: string,
+  signature: string,
+  envSigningKeys: string[]
+): WebhookDispatch | null {
+  if (!configs.length) return null;
+
+  for (const config of configs) {
+    const matchedGroup = config.webhookGroups?.length
+      ? getGroupForSignature(config, body, signature)
+      : null;
+    if (matchedGroup) {
+      return { config, matchedGroup };
+    }
+    const validSingle =
+      config.singleWebhook &&
+      config.singleWebhookSigningKey &&
+      isValidSignature(body, signature, config.singleWebhookSigningKey);
+    if (validSingle) {
+      return { config };
+    }
+    const matchedTarget = getTargetForSignature(config, body, signature);
+    if (matchedTarget) {
+      return { config, matchedTarget };
+    }
+  }
+
+  if (configs.length === 1 && envSigningKeys.length > 0) {
+    const ok = envSigningKeys.some((k) => isValidSignature(body, signature, k));
+    if (ok) {
+      return { config: configs[0]! };
+    }
   }
   return null;
 }

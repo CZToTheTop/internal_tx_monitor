@@ -5,7 +5,7 @@
  * 或设置 .env 中的 BSC_RPC_URL / ALCHEMY_BSC_URL 等
  */
 import "dotenv/config";
-import { loadConfig } from "./config.js";
+import { loadConfigsFromEnv, mergeConfigsForPoll } from "./config.js";
 import { parseTransferFromLog, formatTransferValue } from "./transfer-parser.js";
 
 const RPC_MAP: Record<string, string> = {
@@ -61,7 +61,7 @@ async function getLogs(
 }
 
 async function main() {
-  const config = process.env.CONFIG_PATH ? loadConfig(process.env.CONFIG_PATH) : loadConfig();
+  const config = mergeConfigsForPoll(loadConfigsFromEnv());
 
   const netKey = config.network.toLowerCase().replace(/-/g, "_");
   const rpcUrl = process.env.RPC_URL ?? RPC_MAP[netKey];

@@ -29,6 +29,29 @@ function mkCtx(partial: Partial<MonitorContext>): MonitorContext {
 }
 
 describe("rules-engine runRules", () => {
+  it("when.functions matches if any signature matches (bare name)", async () => {
+    const ctx = mkCtx({
+      functionName: "proposePriceFor",
+      functionSignature:
+        "function proposePriceFor(address,address,bytes32,uint256,bytes,int256)",
+      caller: "0x0000000000000000000000000000000000000002",
+      args: [1, 2, 3, 4, 5, 999],
+    });
+    const rules: RuleConfig[] = [
+      {
+        when: { functions: ["proposePriceFor", "proposePrice"] },
+        checks: [
+          {
+            type: "callerNotIn",
+            allowed: ["0x0000000000000000000000000000000000000001"],
+          },
+        ],
+      },
+    ];
+    const res = await runRules(ctx, rules, dummyState);
+    expect(res).toHaveLength(1);
+  });
+
   it("triggers paramIn when value not allowed", async () => {
     const ctx = mkCtx({
       functionName: "revokeRole",
@@ -147,6 +170,145 @@ describe("rules-engine runRules", () => {
       },
     ];
     const res = await runRules(ctx, rules, dummyState);
+    expect(res).toHaveLength(0);
+  });
+
+  it("merges callerNotIn with allowedFromCall (mock callView)", async () => {
+    const stateWithCall: StateClient = {
+      ...dummyState,
+      async callView() {
+        return [
+          "0xallowed0000000000000000000000000000000001",
+          "0xfeed000000000000000000000000000000000001",
+        ];
+      },
+    };
+    const ctx = mkCtx({
+      caller: "0xfeed000000000000000000000000000000000001",
+      args: [],
+    });
+    const rules: RuleConfig[] = [
+      {
+        checks: [
+          {
+            type: "callerNotIn",
+            allowed: [],
+            allowedFromCall: {
+              contract: "0x0000000000000000000000000000000000000002",
+              signature:
+                "function getWhitelist() view returns (address[])",
+              cacheSeconds: 0,
+            },
+          },
+        ],
+      },
+    ];
+    const res = await runRules(ctx, rules, stateWithCall);
+    expect(res).toHaveLength(0);
+  });
+
+  it("callerNotIn allowedFromCall returns bool (mapping getter)", async () => {
+    let sawArg: unknown;
+    const stateWithCall: StateClient = {
+      ...dummyState,
+      async callView(_c: string, _sig: string, args?: unknown[]) {
+        sawArg = args?.[0];
+        return false;
+      },
+    };
+    const ctx = mkCtx({
+      caller: "0x0000000000000000000000000000000000000001",
+      args: [],
+    });
+    const rules: RuleConfig[] = [
+      {
+        checks: [
+          {
+            type: "callerNotIn",
+            allowed: [],
+            allowedFromCall: {
+              contract: "0x0000000000000000000000000000000000000002",
+              signature:
+                "function isProposerWhitelisted(address) view returns (bool)",
+              args: ["$caller"],
+              returns: "bool",
+              cacheSeconds: 0,
+            },
+          },
+        ],
+      },
+    ];
+    const res = await runRules(ctx, rules, stateWithCall);
+    expect(res).toHaveLength(1);
+    expect(String(sawArg)).toMatch(/^0x[a-fA-F0-9]{40}$/);
+  });
+
+  it("callerNotIn bool uses $arg0 for mapping check", async () => {
+    let passedAddr: unknown;
+    const stateWithCall: StateClient = {
+      ...dummyState,
+      async callView(_c: string, _sig: string, args?: unknown[]) {
+        passedAddr = args?.[0];
+        return true;
+      },
+    };
+    const ctx = mkCtx({
+      caller: "0x0000000000000000000000000000000000000999",
+      args: ["0x0000000000000000000000000000000000000001", "0x02"],
+    });
+    const rules: RuleConfig[] = [
+      {
+        checks: [
+          {
+            type: "callerNotIn",
+            allowed: [],
+            allowedFromCall: {
+              contract: "0x0000000000000000000000000000000000000002",
+              signature:
+                "function isProposerWhitelisted(address) view returns (bool)",
+              args: ["$arg0"],
+              returns: "bool",
+              cacheSeconds: 0,
+            },
+          },
+        ],
+      },
+    ];
+    const res = await runRules(ctx, rules, stateWithCall);
+    expect(res).toHaveLength(0);
+    expect(String(passedAddr).toLowerCase()).toContain("0000000000000000000000000000000000000001");
+  });
+
+  it("callerNotIn bool true does not alert", async () => {
+    const stateWithCall: StateClient = {
+      ...dummyState,
+      async callView() {
+        return true;
+      },
+    };
+    const ctx = mkCtx({
+      caller: "0xbad000000000000000000000000000000000001",
+      args: [],
+    });
+    const rules: RuleConfig[] = [
+      {
+        checks: [
+          {
+            type: "callerNotIn",
+            allowed: [],
+            allowedFromCall: {
+              contract: "0x0000000000000000000000000000000000000002",
+              signature:
+                "function isProposerWhitelisted(address) view returns (bool)",
+              args: ["$caller"],
+              returns: "bool",
+              cacheSeconds: 0,
+            },
+          },
+        ],
+      },
+    ];
+    const res = await runRules(ctx, rules, stateWithCall);
     expect(res).toHaveLength(0);
   });
 

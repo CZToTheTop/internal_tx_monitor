@@ -41,6 +41,7 @@ npm run build
 # 创建 .env
 cat > .env << 'EOF'
 SIGNING_KEYS=whsec_你的key
+# 多项目多 yaml：CONFIG_PATHS=config.a.yaml,config.b.yaml（Signing Key 写在各 yaml）
 PORT=8080
 HOST=0.0.0.0
 EOF

@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { isValidSignature, getGroupForSignature, getTargetForSignature } from "./webhook-util.js";
+import {
+  isValidSignature,
+  getGroupForSignature,
+  getTargetForSignature,
+  resolveWebhookDispatch,
+} from "./webhook-util.js";
 import { createHmac } from "crypto";
 import type { Config } from "./config.js";
 
@@ -60,5 +65,40 @@ describe("getTargetForSignature", () => {
     const t = getTargetForSignature(config, body, sig);
     expect(t).not.toBeNull();
     expect(t!.label).toBe("T1");
+  });
+});
+
+describe("resolveWebhookDispatch", () => {
+  const body = '{"id":"x"}';
+
+  it("picks second config when first does not match", () => {
+    const c1: Config = {
+      network: "ETH_MAINNET",
+      targets: [],
+      webhookUrl: "",
+      webhookGroups: [{ signingKey: "whsec_only1", targets: [{ type: "events", addresses: ["0x1"], label: "X" }] }],
+    };
+    const c2: Config = {
+      network: "ETH_MAINNET",
+      targets: [],
+      webhookUrl: "",
+      webhookGroups: [{ signingKey: "whsec_only2", targets: [{ type: "events", addresses: ["0x2"], label: "Y" }] }],
+    };
+    const sig = createHmac("sha256", "whsec_only2").update(body, "utf8").digest("hex");
+    const d = resolveWebhookDispatch([c1, c2], body, sig, []);
+    expect(d).not.toBeNull();
+    expect(d!.config).toBe(c2);
+    expect(d!.matchedGroup?.signingKey).toBe("whsec_only2");
+  });
+
+  it("uses env key only when single config", () => {
+    const c: Config = {
+      network: "ETH_MAINNET",
+      targets: [{ type: "events", addresses: [], label: "Z" }],
+      webhookUrl: "",
+    };
+    const sig = createHmac("sha256", "whsec_env").update(body, "utf8").digest("hex");
+    expect(resolveWebhookDispatch([c], body, sig, ["whsec_env"])).not.toBeNull();
+    expect(resolveWebhookDispatch([c, c], body, sig, ["whsec_env"])).toBeNull();
   });
 });

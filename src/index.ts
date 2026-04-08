@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { loadConfig } from "./config.js";
+import { loadConfigsFromEnv } from "./config.js";
 import { createServer, startServer } from "./server.js";
 import { createEventHandler } from "./handlers.js";
 
@@ -13,13 +13,16 @@ const signingKeys = signingKeysRaw
   .map((k) => k.trim())
   .filter(Boolean);
 
-const config = process.env.CONFIG_PATH ? loadConfig(process.env.CONFIG_PATH) : loadConfig();
+const configs = loadConfigsFromEnv();
+if (configs.length > 1) {
+  console.log(`[monitor] 已加载 ${configs.length} 份配置: ${configs.map((c) => c.configPath ?? "?").join(", ")}`);
+}
 const app = createServer({
   port: PORT,
   host: HOST,
-  config,
+  configs,
   signingKeys,
-  onEvent: createEventHandler(config),
+  onEvent: createEventHandler(),
 });
 
 startServer(app, PORT, HOST);

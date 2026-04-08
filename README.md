@@ -41,8 +41,24 @@ cloudflared tunnel --url http://localhost:8080
 
 # 3. 创建 Webhook
 npm run setup
-# 单 Webhook / 多组：将输出的 Signing Key 填回 config 对应位置；多 Webhook 可填 .env 的 SIGNING_KEYS
+# 单 Webhook / 多组：将输出的 Signing Key 填回 config 对应位置；仅「单文件」模式可用 .env 的 SIGNING_KEYS 兜底
 ```
+
+### 多份 YAML（不同项目方）
+
+同一进程可加载多个配置文件，便于按客户/项目拆分规则：
+
+```bash
+# .env
+CONFIG_PATHS=./config.predict-fun.yaml,./config.other.yaml
+```
+
+- 分隔符支持 **逗号、分号、换行**。
+- 未设置 `CONFIG_PATHS` 时，仍使用 **`CONFIG_PATH`**（单文件）或默认 **`config.yaml`**。
+- **Alchemy**：每个项目方通常各自建 Webhook，Signing Key 不同；服务端根据 `x-alchemy-signature` **匹配到对应 yaml**，只执行那份配置里的规则。
+- **`.env` 的 `SIGNING_KEYS`**：仅在**只加载 1 个 yaml** 时作为签名校验兜底；**多文件模式下不会用 env 兜底**，避免签名校验通过却路由错项目。多文件时请把 key 写在各 yaml 的 `signing_key` / `targets.signing_key` 中。
+- **`npm run poll`**：会合并所有 yaml 的 `targets` 轮询（要求 **同一 `network`**）。
+- **`npm run setup` / `npm run setup:guide`**：对**每个** yaml 分别创建/打印 Webhook 与 GraphQL。
 
 ### 配置 (config.yaml)
 
@@ -107,7 +123,7 @@ TELEGRAM_CHAT_ID=你的Chat ID
 |------|------|
 | `npm run monitor` | 启动 Webhook 服务 |
 | `npm run setup` | 根据 config 创建 Alchemy Webhooks |
-| `npm run setup:guide` | 输出手动创建 Webhook 的 GraphQL |
+| `npm run setup:guide` | 按当前加载的配置输出 GraphQL（多文件时每个 yaml 一段） |
 | `npm run poll` | 轮询模式，无需 webhook |
 | `npm run test:webhook:local` | 本地带签名测试 |
 | `npm run test:tx` | 解析指定交易的 Transfer 参数 |
@@ -150,8 +166,19 @@ cloudflared tunnel --url http://localhost:8080
 
 # 3. Create webhooks
 npm run setup
-# Single / multi-group: fill Signing Key(s) into config; multi-webhook: can use .env SIGNING_KEYS
+# Single / multi-group: fill Signing Key(s) into config; `.env` SIGNING_KEYS fallback only when a **single** yaml is loaded
 ```
+
+### Multiple YAML files (per tenant / project)
+
+```bash
+CONFIG_PATHS=./config.predict-fun.yaml,./config.other.yaml
+```
+
+- Separators: comma, semicolon, or newline. If unset, use `CONFIG_PATH` or default `config.yaml`.
+- Each Alchemy webhook has its own signing key; the server **routes by signature** to the matching config. Do not rely on `.env` `SIGNING_KEYS` when multiple configs are loaded (keys must live in YAML).
+- `npm run poll` merges all targets (same `network` required).
+- `npm run setup` / `setup:guide` run once per file.
 
 ### Config (config.yaml)
 
@@ -197,7 +224,7 @@ Create bot via [@BotFather](https://t.me/BotFather); get chat_id from `https://a
 |---------|-------------|
 | `npm run monitor` | Start webhook server |
 | `npm run setup` | Create Alchemy webhooks from config |
-| `npm run setup:guide` | Print GraphQL for manual webhook creation |
+| `npm run setup:guide` | Print GraphQL per loaded config file |
 | `npm run poll` | Polling mode (no webhook) |
 | `npm run test:webhook:local` | Local signed webhook test |
 
@@ -214,6 +241,7 @@ Create bot via [@BotFather](https://t.me/BotFather); get chat_id from `https://a
 monitor/
 ├── config.yaml                    # Your config (gitignored)
 ├── config.example.yaml            # Config template
+├── config.predict-fun.yaml        # Example: full project rules (optional split per tenant)
 ├── config.safe-timelock-test.yaml # Example: Safe → Timelock schedule/execute
 ├── src/
 │   ├── index.ts         # Entry
@@ -239,9 +267,10 @@ monitor/
 
 ## Troubleshooting
 
-- **401 Invalid signature**: Add correct `SIGNING_KEYS` to `.env` and restart. For testing, use `SKIP_SIGNATURE_VALIDATION=true`.
+- **401 Invalid signature**: Ensure the request’s Signing Key matches the yaml that owns that Webhook (`signing_key` / group). With a **single** config file you may also set `.env` `SIGNING_KEYS`. With **`CONFIG_PATHS` (multiple files)**, keys must be in YAML — env list is not used for routing. For local testing: `SKIP_SIGNATURE_VALIDATION=true`.
 - **Alchemy cannot reach webhook**: Deploy to a public server (Aliyun, Railway, etc.) instead of local tunnel.
 - **fromList.map is not a function**: Fix YAML format — use `- "0x..."` (space after `-`), not `-["0x..."]`.
+- **GraphQL 地址数量少于 yaml / Fewer addresses in GraphQL**: 合并查询会对地址与 topic **去重**；细粒度条件（`rules`、`methodSelectors`）仅在服务端生效，不会写进 GraphQL。Merged queries **dedupe** addresses/topics; rules and selectors are server-side only.
 
 ## References
 

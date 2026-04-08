@@ -1,6 +1,10 @@
 import express, { Request, Response } from "express";
-import type { Config, MonitorTarget, WebhookGroup } from "./config.js";
-import { getGroupForSignature, getTargetForSignature, isValidSignature, type AlchemyWebhookEvent } from "./webhook-util.js";
+import type { Config } from "./config.js";
+import {
+  resolveWebhookDispatch,
+  type AlchemyWebhookEvent,
+  type WebhookDispatch,
+} from "./webhook-util.js";
 
 const WEBHOOK_PATH = "/webhook";
 
@@ -15,11 +19,13 @@ declare global {
 export interface ServerOptions {
   port: number;
   host: string;
-  /** 从 config 的 target.signing_key 匹配入站请求，区分哪个监控 */
+  /** 单文件兼容：等价于 configs: [config] */
   config?: Config;
-  /** 兼容旧版：未在 config 中配 signing_key 时用 env 的 key 列表 */
+  /** 多项目多 yaml：按签名命中对应 Config 再处理 */
+  configs?: Config[];
+  /** 兼容旧版：仅单 Config 时可用 env 的 key 列表兜底整表匹配 */
   signingKeys: string[];
-  onEvent: (event: AlchemyWebhookEvent, matchedTarget?: MonitorTarget, matchedGroup?: WebhookGroup) => void | Promise<void>;
+  onEvent: (event: AlchemyWebhookEvent, dispatch: WebhookDispatch) => void | Promise<void>;
 }
 
 /**
@@ -27,7 +33,12 @@ export interface ServerOptions {
  * 支持多个 signing key（每个 webhook 一个）
  */
 export function createServer(options: ServerOptions): express.Express {
-  const { config, signingKeys, onEvent } = options;
+  const { signingKeys, onEvent } = options;
+  const configs =
+    options.configs?.length ? options.configs : options.config ? [options.config] : [];
+  if (configs.length === 0) {
+    throw new Error("createServer: 须提供 config 或 configs");
+  }
   const app = express();
 
   app.use(
@@ -57,25 +68,15 @@ export function createServer(options: ServerOptions): express.Express {
       }
 
       const body = req.rawBody?.toString("utf8") ?? JSON.stringify(req.body);
-      // 多组模式：先按 signing_key 分流到对应组，handler 只在该组内按规则匹配
-      const matchedGroup = config?.webhookGroups?.length ? getGroupForSignature(config, body, signature!) : null;
-      const validSingle =
-        !matchedGroup &&
-        config?.singleWebhook &&
-        config.singleWebhookSigningKey &&
-        isValidSignature(body, signature!, config.singleWebhookSigningKey);
-      const matchedTarget =
-        !matchedGroup && !validSingle && config ? getTargetForSignature(config, body, signature!) : null;
-      const validEnv = signingKeys.length > 0 && signingKeys.some((k) => isValidSignature(body, signature!, k));
-      if (!matchedGroup && !validSingle && !matchedTarget && !validEnv) {
+      const dispatch = resolveWebhookDispatch(configs, body, signature!, signingKeys);
+      if (!dispatch) {
         res.status(401).send("Invalid signature");
         return;
       }
-      if (matchedGroup) {
-        await onEvent(event, undefined, matchedGroup);
-      } else {
-        await onEvent(event, validSingle ? undefined : matchedTarget ?? undefined, undefined);
+      if (configs.length > 1 && dispatch.config.configPath) {
+        console.log(`[webhook] 命中配置 ${dispatch.config.configPath}`);
       }
+      await onEvent(event, dispatch);
       res.status(200).send("OK");
     } catch (err) {
       console.error("[webhook] 处理异常:", err instanceof Error ? err.stack : err);

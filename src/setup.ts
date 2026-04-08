@@ -5,10 +5,10 @@
  *
  * 需要环境变量:
  *   ALCHEMY_AUTH_TOKEN - Alchemy Dashboard 顶部的 Auth Token
- *   (可选) CONFIG_PATH - 配置文件路径，默认 config.yaml
+ *   (可选) CONFIG_PATH / CONFIG_PATHS - 单文件或多文件（逗号或换行分隔），默认 config.yaml
  */
 import "dotenv/config";
-import { loadConfig } from "./config.js";
+import { loadConfigsFromEnv, type Config } from "./config.js";
 import { buildGraphQLQuery, buildMergedQuery } from "./graphql.js";
 import { createWebhook } from "./alchemy-api.js";
 
@@ -19,36 +19,34 @@ if (!authToken) {
 }
 const token: string = authToken;
 
-async function main(): Promise<void> {
-  const config = process.env.CONFIG_PATH
-    ? loadConfig(process.env.CONFIG_PATH)
-    : loadConfig();
+async function runOneConfig(config: Config, fileLabel: string): Promise<string[]> {
+  const signingKeys: string[] = [];
 
   if (!config.webhookUrl) {
-    console.error("config.yaml 必须包含 webhookUrl（用于 Webhook 模式）");
-    process.exit(1);
+    console.error(`${fileLabel}: 缺少 webhookUrl，跳过`);
+    return signingKeys;
   }
+
+  console.log(`\n======== ${fileLabel} ========`);
   console.log(`网络: ${config.network}`);
   console.log(`Webhook URL: ${config.webhookUrl}`);
   const groups = config.webhookGroups;
   if (groups?.length) {
-    console.log(`模式: 多组（${groups.length} 个 signing_key 组，每组多条规则，先按 key 分流再组内匹配）`);
+    console.log(`模式: 多组（${groups.length} 个 signing_key 组）`);
     console.log(`共 ${config.targets.length} 条规则\n`);
   } else {
     console.log(`监控目标: ${config.targets.length} 个`);
     if (config.singleWebhook) {
-      console.log("模式: 单 Webhook（整份 config 共用一个，服务端按 target 多维度筛查）\n");
+      console.log("模式: 单 Webhook（整份 config 共用一个）\n");
     } else {
       console.log("");
     }
   }
 
-  const signingKeys: string[] = [];
-
   if (groups?.length) {
     for (let i = 0; i < groups.length; i++) {
       const group = groups[i]!;
-      const name = `monitor_group_${i + 1}_${Date.now()}`;
+      const name = `monitor_${fileLabel}_group_${i + 1}_${Date.now()}`.replace(/[^a-zA-Z0-9_-]/g, "_");
       console.log(`创建 Webhook 组 [${i + 1}/${groups.length}]（${group.targets.length} 条规则）`);
       try {
         const query = buildMergedQuery({ ...config, targets: group.targets });
@@ -61,7 +59,7 @@ async function main(): Promise<void> {
         console.log(`  ✅ 已创建: ${id}`);
         if (signingKey) {
           signingKeys.push(signingKey);
-          console.log(`  Signing Key: ${signingKey.slice(0, 12)}... → 填到 config 第 ${i + 1} 个 group 的 signing_key`);
+          console.log(`  Signing Key: ${signingKey.slice(0, 12)}... → 填到该文件第 ${i + 1} 个 group 的 signing_key`);
         }
       } catch (err) {
         console.error("  ❌ 失败:", err);
@@ -69,8 +67,8 @@ async function main(): Promise<void> {
       console.log("");
     }
   } else if (config.singleWebhook) {
-    const name = `monitor_merged_${Date.now()}`;
-    console.log("创建 1 个合并 Webhook（覆盖所有 target 的过滤条件）");
+    const name = `monitor_${fileLabel}_merged_${Date.now()}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+    console.log("创建 1 个合并 Webhook");
     try {
       const query = buildMergedQuery(config);
       const { id, signingKey } = await createWebhook(token, {
@@ -91,7 +89,7 @@ async function main(): Promise<void> {
     for (let i = 0; i < config.targets.length; i++) {
       const target = config.targets[i]!;
       const label = target.label ?? `${target.type}_${i}`;
-      const name = `monitor_${label}_${Date.now()}`.replace(/\s+/g, "_");
+      const name = `monitor_${fileLabel}_${label}_${Date.now()}`.replace(/\s+/g, "_");
 
       const query = buildGraphQLQuery(target);
       const network = target.network ?? config.network;
@@ -118,16 +116,23 @@ async function main(): Promise<void> {
     }
   }
 
-  if (signingKeys.length) {
+  return signingKeys;
+}
+
+async function main(): Promise<void> {
+  const configs = loadConfigsFromEnv();
+  const allKeys: string[] = [];
+
+  for (const config of configs) {
+    const label = config.configPath ?? "config";
+    const keys = await runOneConfig(config, label);
+    allKeys.push(...keys);
+  }
+
+  if (allKeys.length) {
     console.log("---");
-    if (groups?.length) {
-      console.log("请将上述每个 Signing Key 按顺序填入 config 中对应 group 的 signing_key（第 1 个 key → 第 1 个 group）");
-    } else if (config.singleWebhook) {
-      console.log("请将上述 Signing Key 填入 config 的 targets.signing_key（单 Webhook 模式）");
-    } else {
-      console.log("请将每个 Webhook 的 Signing Key 填入 config.yaml 对应 target 的 signing_key（推荐），");
-      console.log("或填入 .env: SIGNING_KEYS=" + signingKeys.join(","));
-    }
+    console.log("请将各 Webhook 的 Signing Key 填回对应 yaml 的 signing_key / group（多文件时按文件名区分）");
+    console.log("或 .env: SIGNING_KEYS=" + allKeys.join(","));
     console.log("");
     console.log("然后运行: npm run monitor");
   }

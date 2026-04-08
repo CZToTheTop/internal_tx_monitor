@@ -49,6 +49,14 @@ export function getTargetMethodSelectors(target: { type: string; methodSelectors
   return [...set];
 }
 
+/** 比较 log topic 与配置的 32 字节 hex（忽略大小写、0x） */
+function topic32Eq(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false;
+  const na = a.toLowerCase().replace(/^0x/, "").padStart(64, "0").slice(0, 64);
+  const nb = b.toLowerCase().replace(/^0x/, "").padStart(64, "0").slice(0, 64);
+  return na === nb;
+}
+
 export function matchLogToTargets(
   log: { account?: { address?: string }; topics?: string[] },
   eventTargets: MonitorTarget[]
@@ -58,6 +66,7 @@ export function matchLogToTargets(
   return eventTargets.filter((t) => {
     if (!inList(logAddr, t.addresses)) return false;
     if (t.topics?.length && !t.topics.some((top) => topics[0] === top)) return false;
+    if (t.topic1Equals && !topic32Eq(topics[1], t.topic1Equals)) return false;
     return true;
   });
 }

@@ -1,5 +1,5 @@
 import type { Config, MonitorTarget, WebhookGroup } from "./config.js";
-import type { AlchemyWebhookEvent } from "./webhook-util.js";
+import type { AlchemyWebhookEvent, WebhookDispatch } from "./webhook-util.js";
 import { sendTelegram, getExplorerBase } from "./telegram.js";
 import { getTraceToTxMapFromExplorer } from "./explorer-api.js";
 import { getRpcUrl, getTraceToTxMap } from "./trace-api.js";
@@ -370,7 +370,7 @@ async function alertByTargetMatch(
         trace,
         args: argsArray,
         functionName: decoded?.name,
-        functionSignature: decoded?.name,
+        functionSignature: decoded?.signature ?? decoded?.name,
         caller: traceObj?.from?.address,
       };
       const ruleResults = await runRules(ctx, t.rules);
@@ -387,18 +387,19 @@ async function alertByTargetMatch(
 }
 
 /**
- * 创建事件处理器：根据 matchedTarget / matchedGroup 区分；多组时先按 signing_key 分流，再在组内按规则匹配报警
+ * 创建事件处理器：入参为 `WebhookDispatch`（含对应 yaml 的 Config 与分流结果）。
  */
-export function createEventHandler(
-  config: Config
-): (event: AlchemyWebhookEvent, matchedTarget?: MonitorTarget, matchedGroup?: WebhookGroup) => void {
-  const methodSelectors = getMethodSelectors(config);
-
+export function createEventHandler(): (
+  event: AlchemyWebhookEvent,
+  dispatch: WebhookDispatch
+) => Promise<void> {
   return async function eventHandler(
     event: AlchemyWebhookEvent,
-    matchedTarget?: MonitorTarget,
-    matchedGroup?: WebhookGroup
+    dispatch: WebhookDispatch
   ): Promise<void> {
+    const { config, matchedGroup, matchedTarget } = dispatch;
+    const methodSelectors = getMethodSelectors(config);
+
     const block = event?.event?.data?.block;
     let traces = block?.callTracerTraces;
     const targetSelectors = matchedTarget ? getTargetMethodSelectors(matchedTarget) : methodSelectors;
@@ -413,17 +414,14 @@ export function createEventHandler(
     formatEvent(event, traces);
 
     if (matchedTarget) {
-      // 单 target + signing_key 模式：按该 target 的规则匹配（含 rules 引擎）
       if (block) {
         await alertByTargetMatch(config, block, () => getTxHash(event), [matchedTarget]);
       }
     } else if (matchedGroup?.targets?.length) {
-      // 多组模式：已按 signing_key 分流到该组，只在该组内按规则匹配报警
       if (block) {
         await alertByTargetMatch(config, block, () => getTxHash(event), matchedGroup.targets);
       }
     } else {
-      // 单 Webhook 模式或仅用 env key 校验：将 payload 与 config.targets 做多维匹配，按 target 分别报警
       if (block && config.targets.length > 0) {
         await alertByTargetMatch(config, block, () => getTxHash(event));
       }

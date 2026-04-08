@@ -20,11 +20,11 @@ Security review of the Alchemy chain monitor project. Key findings and mitigatio
 
 **Fix**: Added `escapeHtml()` and hex sanitization for dynamic content in `handlers.ts`.
 
-### 3. CONFIG_PATH Path Traversal (Low)
+### 3. CONFIG_PATH / CONFIG_PATHS Path Traversal (Low)
 
-**Issue**: `CONFIG_PATH` env var could point outside project directory (e.g. `../../../etc/passwd`), allowing arbitrary file read.
+**Issue**: `CONFIG_PATH` or each path in `CONFIG_PATHS` could resolve outside the project directory (e.g. `../../../etc/passwd`), allowing arbitrary file read.
 
-**Fix**: Validate resolved path stays under `process.cwd()` in `config.ts`.
+**Fix**: Validate every resolved path stays under `process.cwd()` in `config.ts` (`loadConfig` per file).
 
 ---
 
