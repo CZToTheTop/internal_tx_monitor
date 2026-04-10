@@ -211,3 +211,4 @@ pm2 logs alchemy-monitor    # 查看日志
 pm2 restart alchemy-monitor # 重启
 pm2 stop alchemy-monitor    # 停止
 ```
+

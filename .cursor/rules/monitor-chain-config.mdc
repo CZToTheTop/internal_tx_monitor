@@ -1,0 +1,56 @@
+---
+description: 链上监控 YAML（internal_calls / callerNotIn / custom handlers）与已验证合约源码对齐的工作流
+globs: config*.yaml
+alwaysApply: false
+---
+
+# 监控规则与链上权限对齐
+
+## 0. 配置文件命名（与 Git）
+
+- **入库**：仅 **`config.example.yaml`** 作为模板提交到仓库。
+- **不入库**：任意 **`config.<名称>.yaml`**（中间段自定义），例如 `config.tbill.ethereum.yaml`、`config.predic-fun.yaml`；由 `config.example.yaml` 复制后按环境/项目修改，通过 `.gitignore` 的 `config.*.yaml` + `!config.example.yaml` 排除。
+- **运行时顶层配置名** `config.yaml` 亦在 `.gitignore` 中（常为部署时由 example 复制或软链）。
+
+编辑任意本地 `config*.yaml` 里与**合约权限**相关的规则时，按下列顺序做，避免「凭想象写 owner/operator」或把不同 modifier 混成一条策略。
+
+## 1. 先定合约身份，再读实现
+
+- **代理合约**：Etherscan / Arbiscan `getsourcecode` 会返回 **Proxy**；必须在注释或笔记里写明 **Implementation 地址**，并对 **实现合约** 读源码（modifier 在实现上）。
+- 在 YAML 文件头用一两行记录：`代理地址` → `实现合约名` + `实现地址` + 探索来源（已验证）。
+
+## 2. 用源码标注每个 selector 的真实 modifier
+
+- 对每一个 `methodSelectors` 条目，在注释里写明源码中的修饰符，例如：`onlyOwner` / `onlyOperator` / `onlyMaintainer` / `onlyAdminOrOperator` / `AccessControl` 的 `onlyRole`。
+- **不要**把「管理类函数」默认当成 `onlyOwner`：同一 Vault 里常见 **Owner / Maintainer / Operator** 三层，混在一个「全部 alwaysAlert」里会误导后续维护者；应按 modifier **拆成多条 target**，或拆成「仅告警未授权 caller」的 `callerNotIn` + `allowedFromCall`。
+- **映射 getter 与 modifier 对齐**（已在本仓库规则引擎中支持）：
+  - `onlyOperator` + `mapping(address => bool) operators` → `operators($caller)`，`returns: bool`。
+  - `onlyMaintainer` + `address public maintainer` → `maintainer()` 无参，返回单个地址，用 `allowedFromCall` 的 **addresses** 语义（返回值解析为白名单列表，单地址亦可），`caller` 在列表中则不告警。
+- OpenZeppelin **AccessControl**：周期性/业务函数常用 `OPERATOR_ROLE` 与 `DEFAULT_ADMIN_ROLE`；`DEFAULT_ADMIN_ROLE` 在链上是 **bytes32(0)**，不是 `keccak256("DEFAULT_ADMIN_ROLE")`。应用 `hasRole` 时与源码中的 `onlyAdmin` / `onlyAdminOrOperator` 对照，确认是否只需这两类角色。
+
+## 3. Selector 与 ABI
+
+- 注释中的函数签名须与 **4 字节 selector** 一致；可用 `ethers.id("transfer(address,uint256)").slice(0,10)` 或项目内脚本核对。
+- `when.function` / `when.functions` 中的签名须与监控管线解码到的 `functionSignature` 能匹配（见 `rules-engine` 的 `functionMatches`）。
+
+## 4. `callerNotIn` / `allowedFromCall`
+
+- 与链上权限一致时，优先 **动态白名单**（`allowedFromCall`），避免用错 `owner()` 代表 operator 集合。
+- `allowed: ["0x000…000"]` 仅作占位时，在团队内应知悉：引擎里静态列表几乎不会命中真实 caller；可省略 `allowed`、只配 `allowedFromCall`（见 `src/config.ts` 说明）。
+- `cacheSeconds`：**仅监控端 RPC 缓存**，链上无对应字段；注释中可写明，避免被误解为合约参数。
+
+## 5. Custom handler
+
+- `alertIfNotAnyRole` 等依赖 `hasRole` 的 handler，**role 哈希**须与链上 `ROLE()` getter 或源码 `keccak256("ROLE_NAME")` 一致；主网与 L2 若同源部署，角色哈希通常相同，但仍以各链验证为准。
+
+## 6. 策略类型
+
+- **一律告警**（`alwaysAlertWithCallee`）：适合「任何调用都要人工知晓」的配置变更、所有权、角色授予、升级等；若源码显示调用者**总是**同一类角色（例如 KYC 全 `onlyOwner`），仍可用「全量告警」作为 ops 策略，但注释应写明「源码均为 onlyOwner」。
+- **仅未授权告警**：适合已分清 Owner / Operator / Maintainer / Role 的场景，减少误报。
+
+## 7. 交付前自检
+
+- [ ] 代理是否已解析到实现并基于实现核对 modifier？
+- [ ] 每个 selector 注释是否与源码一致？
+- [ ] `allowedFromCall` 的签名是否与已验证 ABI 一致（含 `view`、参数顺序）？
+- [ ] Oracle / Vault 等多合约场景是否未混淆地址与 `contract:` 字段？

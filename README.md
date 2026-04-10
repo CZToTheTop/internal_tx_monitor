@@ -72,6 +72,7 @@ CONFIG_PATHS=./config.predict-fun.yaml,./config.other.yaml
 
 - **methodSelectors**（internal_calls）：仅当 internal call 的 `input` 以配置的 selector 开头时才发报警。
 - 示例配置：见 [config.safe-timelock-test.yaml](config.safe-timelock-test.yaml)（Safe → Timelock schedule/execute 等）。
+- **Open Eden TBILL**（主网角色/配置/升级，不含用户存取）：[config.tbill.ethereum.yaml](config.tbill.ethereum.yaml)、[config.tbill.arbitrum.yaml](config.tbill.arbitrum.yaml)（ETH 与 Arb 各一链、各一 Webhook；可同时 `CONFIG_PATHS=./config.tbill.ethereum.yaml,./config.tbill.arbitrum.yaml` 跑同一 monitor）。
 
 **单 Webhook 示例：**
 
@@ -241,7 +242,9 @@ Create bot via [@BotFather](https://t.me/BotFather); get chat_id from `https://a
 monitor/
 ├── config.yaml                    # Your config (gitignored)
 ├── config.example.yaml            # Config template
-├── config.predict-fun.yaml        # Example: full project rules (optional split per tenant)
+├── config.tbill.ethereum.yaml   # TBILL: ETH — admin / oracle / KYC (no user flows)
+├── config.tbill.arbitrum.yaml   # TBILL: Arbitrum — same rule set, different addresses
+├── config.predict-fun.yaml      # Example: full project rules (optional split per tenant)
 ├── config.safe-timelock-test.yaml # Example: Safe → Timelock schedule/execute
 ├── src/
 │   ├── index.ts         # Entry

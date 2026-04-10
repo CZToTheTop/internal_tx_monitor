@@ -2,6 +2,9 @@ node_modules/
 dist/
 .env
 config.yaml
+# 命名：仅 config.example.yaml 可入库；其余 config.<名称>.yaml 均为本地/环境特化，不入库
+config.*.yaml
+!config.example.yaml
 *.log
 tmp-test-config/
 .abi-cache/

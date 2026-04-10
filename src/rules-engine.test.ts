@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { MonitorContext, StateClient } from "./rules-engine.js";
 import { runRules } from "./rules-engine.js";
 import type { RuleConfig } from "./config.js";
+import "./custom-rules.js";
 
 const dummyState: StateClient = {
   async getNativeBalance() {
@@ -310,6 +311,64 @@ describe("rules-engine runRules", () => {
     ];
     const res = await runRules(ctx, rules, stateWithCall);
     expect(res).toHaveLength(0);
+  });
+
+  it("alertIfNotAnyRole: no alert when hasRole returns true", async () => {
+    const state: StateClient = {
+      ...dummyState,
+      async callView() {
+        return true;
+      },
+    };
+    const ctx = mkCtx({
+      functionName: "updatePrice",
+      caller: "0x1111111111111111111111111111111111111111",
+      args: [1000n],
+    });
+    const rules: RuleConfig[] = [
+      {
+        name: "oracle-price",
+        handler: "alertIfNotAnyRole",
+        params: {
+          contract: "0xCe9a6626Eb99eaeA829D7fA613d5D0A2eaE45F40",
+          functionNames: ["updatePrice"],
+          roleHashes: ["0x97667070c54ef182b0f5858b034beac1b6f3089aa2d3188bb1e8929f4fa9b929"],
+        },
+      },
+    ];
+    const res = await runRules(ctx, rules, state);
+    expect(res).toHaveLength(0);
+  });
+
+  it("alertIfNotAnyRole: alert when hasRole always false", async () => {
+    const state: StateClient = {
+      ...dummyState,
+      async callView() {
+        return false;
+      },
+    };
+    const ctx = mkCtx({
+      functionName: "updatePrice",
+      caller: "0x2222222222222222222222222222222222222222",
+      args: [1000n],
+    });
+    const rules: RuleConfig[] = [
+      {
+        name: "oracle-price",
+        handler: "alertIfNotAnyRole",
+        params: {
+          contract: "0xCe9a6626Eb99eaeA829D7fA613d5D0A2eaE45F40",
+          functionNames: ["updatePrice"],
+          roleHashes: [
+            "0x97667070c54ef182b0f5858b034beac1b6f3089aa2d3188bb1e8929f4fa9b929",
+            "0x0000000000000000000000000000000000000000000000000000000000000000",
+          ],
+        },
+      },
+    ];
+    const res = await runRules(ctx, rules, state);
+    expect(res).toHaveLength(1);
+    expect(res[0]!.matched).toBe(true);
   });
 
   it("triggers paramOutsideRange when param above max", async () => {

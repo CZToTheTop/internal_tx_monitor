@@ -184,6 +184,55 @@ registerCustomRuleHandler("alwaysAlertWithCallee", async (ctx, rule, _state): Pr
 });
 
 /**
+ * OpenZeppelin AccessControl：仅当 caller 对 `roleHashes` 中**任意**一个 role 的 `hasRole` 为 false 时告警。
+ * 用于周期性喂价等函数：正常 keeper 有 OPERATOR_ROLE 或管理员有 DEFAULT_ADMIN_ROLE 时不报。
+ *
+ * params:
+ * - `contract`: 实现 AccessControl 的合约地址（如 TBILL Oracle）
+ * - `roleHashes`: bytes32 十六进制数组，如 `[OPERATOR_ROLE(), DEFAULT_ADMIN_ROLE()]`
+ * - `functionNames`（可选）：限制在哪些函数名上执行校验（小写）
+ */
+registerCustomRuleHandler("alertIfNotAnyRole", async (ctx, rule, state): Promise<RuleResult | null> => {
+  if (ctx.kind !== "internal_call") return null;
+  const fn = (ctx.functionName ?? "").toLowerCase();
+  const nameList = (rule.params?.functionNames as string[] | undefined)?.map((s) => s.toLowerCase());
+  if (nameList?.length && !nameList.includes(fn)) return null;
+
+  const contract = (rule.params?.contract as string | undefined)?.trim();
+  const roleHashes = rule.params?.roleHashes as string[] | undefined;
+  if (!contract || !roleHashes?.length) return null;
+
+  const caller = ctx.caller?.trim();
+  if (!caller) {
+    return { rule, matched: true, reason: "无 caller，无法校验角色" };
+  }
+  if (!state.callView) {
+    return { rule, matched: true, reason: "未实现 callView，无法校验 hasRole" };
+  }
+
+  for (const role of roleHashes) {
+    try {
+      const ok = await state.callView(
+        contract,
+        "function hasRole(bytes32 role, address account) view returns (bool)",
+        [role, caller]
+      );
+      if (Boolean(ok)) {
+        return { rule, matched: false };
+      }
+    } catch {
+      // 试下一 role
+    }
+  }
+
+  return {
+    rule,
+    matched: true,
+    reason: `caller ${caller} 无已配置角色（${fn}）`,
+  };
+});
+
+/**
  * 人工/应急结算 payout 二元校验：合法为 [0,1]、[1,0]、[1,1]（与 UMA OO 价格构造一致）。
  * 支持：emergencyResolve / resolveManually（bytes32 + uint256[]）、NegRiskOperator.emergencyResolveQuestion(bytes32,bool)。
  */
