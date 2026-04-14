@@ -242,6 +242,8 @@ export function loadConfig(path?: string): Config {
   let targets: MonitorTarget[];
   let singleWebhookSigningKey: string | undefined;
   let webhookGroups: WebhookGroup[] | undefined;
+  /** `targets: { signing_key, list: [...] }` 单组对象写法（非多组数组） */
+  let targetsFromListObject = false;
 
   const rawTargets = parsed.targets;
   const first = Array.isArray(rawTargets) && rawTargets.length > 0 ? rawTargets[0] : null;
@@ -273,6 +275,7 @@ export function loadConfig(path?: string): Config {
     !Array.isArray(rawTargets) &&
     Array.isArray((rawTargets as { list?: unknown[] }).list)
   ) {
+    targetsFromListObject = true;
     const obj = rawTargets as { signing_key?: string; list: MonitorTarget[] };
     singleWebhookSigningKey = obj.signing_key?.trim() || undefined;
     targets = obj.list;
@@ -294,11 +297,21 @@ export function loadConfig(path?: string): Config {
     }
   }
 
+  /** 单组 `targets: { signing_key, list }` 时默认视为单 Webhook：合并 GraphQL、整表匹配；显式 `singleWebhook: false` 可关闭 */
+  let singleWebhook: boolean | undefined;
+  if (typeof parsed.singleWebhook === "boolean") {
+    singleWebhook = parsed.singleWebhook;
+  } else if (targetsFromListObject) {
+    singleWebhook = true;
+  } else {
+    singleWebhook = undefined;
+  }
+
   return {
     network,
     targets,
     webhookUrl,
-    singleWebhook: parsed.singleWebhook as boolean | undefined,
+    singleWebhook,
     singleWebhookSigningKey,
     webhookGroups,
     configPath: realPath,

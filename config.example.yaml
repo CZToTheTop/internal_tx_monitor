@@ -10,9 +10,10 @@ network: eth_mainnet
 # 公网可访问的 Webhook 地址（Alchemy 会向此 URL 推送数据）
 webhookUrl: https://your-server.com/webhook
 
-# 单 Webhook 模式：
-#   true = 只创建 1 个 Webhook，signing_key 写在 targets 下，target 列表写在 targets.list
-# 多组模式：targets 为「数组的数组」每项为 { signing_key, list }，每个 key 对应一组规则，收到 event 先按 key 分流再组内匹配
+# 单 Webhook 模式（targets 为 { signing_key, list: [ ... ] } 时）：
+#   可省略本行：加载时默认 singleWebhook=true，npm run setup 会生成「合并一条」GraphQL（所有 to/from 地址去重进同一 filter）
+#   显式 false = 每个 target 单独一条 GraphQL / 多个 Webhook
+# 多组模式：targets 为「数组的数组」每项为 { signing_key, list }，每个 key 对应一组规则，组内同样合并 GraphQL
 # singleWebhook: true
 
 # ---------- 监控目标 ------------

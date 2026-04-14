@@ -69,7 +69,7 @@ Monitor is an on-chain monitoring service built on **Alchemy Notify Webhooks**. 
 
 | Mode | Behavior |
 |------|----------|
-| Single webhook | `singleWebhook: true` + `targets: { signing_key, list: [...] }`; one webhook, many rules; alert per `label` |
+| Single webhook | `targets: { signing_key, list: [...] }` — **`singleWebhook` defaults to true** (omit or set explicitly); **one merged GraphQL** with deduped filters; alert per `label` server-side |
 | Multi-group | `targets: [ { signing_key, list }, ... ]`; route by group signature, then match inside the group |
 | Multi-webhook | One webhook per target; `signing_key` or env fallback in single-file mode |
 
@@ -229,7 +229,7 @@ Monitor 是一套基于 **Alchemy Notify Webhook** 的链上监控服务：在�
 
 | 模式 | 行为概要 |
 |------|----------|
-| 单 Webhook | `singleWebhook: true` + `targets: { signing_key, list: [...] }`，一条 Webhook 多规则，按 `label` 告警 |
+| 单 Webhook | `targets: { signing_key, list: [...] }` — 未写 `singleWebhook` 时**默认**单 Webhook、**合并一条 GraphQL**（地址去重）；按 `label` 与规则在服务端筛查 |
 | 多组 | `targets: [ { signing_key, list }, ... ]`，先按组签名分流，再组内匹配 |
 | 多 Webhook | 每个 target 独立 Webhook；`signing_key` 或单文件时 env 兜底 |
 

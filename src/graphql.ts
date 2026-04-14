@@ -125,7 +125,12 @@ export function buildGraphQLQuery(target: MonitorTarget): string {
   }
 }
 
-/** 单 Webhook 模式：合并所有 target 的过滤条件，生成一条 GraphQL，在服务端再按 target 做多维筛查 */
+/**
+ * 单 Webhook 模式：合并所有 target 的链上过滤条件为**一条** GraphQL。
+ * - internal_calls：`from` / `to` 地址分别为所有相关 target 的并集（list 包裹）
+ * - events / transactions：同理对 addresses、topics、tx from/to 去重合并
+ * 细粒度规则（`methodSelectors`、`rules`）仅在服务端生效，不写入 GraphQL。
+ */
 export function buildMergedQuery(config: Config): string {
   const eventTargets = config.targets.filter((t) => t.type === "events");
   const txTargets = config.targets.filter((t) => t.type === "transactions");

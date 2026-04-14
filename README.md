@@ -77,7 +77,7 @@ CONFIG_PATHS=./config.predict-fun.yaml,./config.other.yaml
 
 | 模式 | targets 写法 | 说明 |
 |------|--------------|------|
-| **单 Webhook** | `targets: { signing_key, list: [ ... ] }` + `singleWebhook: true` | 只建 1 个 Webhook，一个 key，多条规则；服务端按规则匹配，用对应 label 报警。Signing Key 填到 `targets.signing_key`。 |
+| **单 Webhook** | `targets: { signing_key, list: [ ... ] }`（可省略 `singleWebhook`，加载时**默认**视为单 Webhook） | 只建 1 个 Webhook、**合并一条 GraphQL**（所有 `to`/`from`/合约地址去重后写入同一 filter）；服务端再按 `methodSelectors` / `rules` 匹配，用对应 label 报警。Signing Key 填到 `targets.signing_key`。显式 `singleWebhook: false` 可改为「每 target 一条 GraphQL」。 |
 | **多组** | `targets: [ { signing_key, list: [ ... ] }, ... ]` | 每个 key 对应一组规则；收到 event 先按 signing_key 分流到组，再在该组内按规则匹配报警。每组一个 Webhook，setup 后按顺序填各组的 `signing_key`。 |
 | **多 Webhook** | `targets: [ { type, label, signing_key?, ... }, ... ]` | 每个 target 一个 Webhook；按 target 的 `signing_key` 或 `.env` 的 `SIGNING_KEYS` 校验。 |
 
@@ -209,7 +209,7 @@ Three `targets` shapes:
 
 | Mode | targets shape | Behavior |
 |------|----------------|----------|
-| **Single webhook** | `targets: { signing_key, list: [ ... ] }` + `singleWebhook: true` | One webhook, one key, multiple rules; server matches and alerts per rule label. Put Signing Key in `targets.signing_key`. |
+| **Single webhook** | `targets: { signing_key, list: [ ... ] }` (`singleWebhook` defaults to **true** for this shape) | One webhook, **one merged GraphQL** (deduped `to`/`from`/addresses in filters); server matches `methodSelectors` / `rules` per target. Put Signing Key in `targets.signing_key`. Set `singleWebhook: false` for one GraphQL per target. |
 | **Multi-group** | `targets: [ { signing_key, list: [ ... ] }, ... ]` | Each key = one group of rules; request is routed by signing_key, then matched against that group only. One webhook per group; fill each group’s `signing_key` after setup. |
 | **Multi-webhook** | `targets: [ { type, label, signing_key?, ... }, ... ]` | One webhook per target; validate by per-target `signing_key` or `.env` `SIGNING_KEYS`. |
 

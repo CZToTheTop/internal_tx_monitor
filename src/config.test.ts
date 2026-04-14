@@ -25,9 +25,37 @@ targets:
     const c = loadConfig(path);
     expect(c.network).toBe("BNB_MAINNET");
     expect(c.configPath).toContain("single.yaml");
+    expect(c.singleWebhook).toBe(true);
     expect(c.singleWebhookSigningKey).toBe("whsec_x");
     expect(c.targets).toHaveLength(1);
     expect(c.targets[0]!.label).toBe("L1");
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it("infers singleWebhook when targets is { signing_key, list } without singleWebhook key", () => {
+    mkdirSync(TMP, { recursive: true });
+    const path = join(TMP, "infer.yaml");
+    writeFileSync(
+      path,
+      `
+network: bsc_mainnet
+webhookUrl: https://x.com
+targets:
+  signing_key: ""
+  list:
+    - type: internal_calls
+      addresses: ["0x0000000000000000000000000000000000000001"]
+      toAddresses: ["0x0000000000000000000000000000000000000002"]
+      label: A
+    - type: internal_calls
+      addresses: ["0x0000000000000000000000000000000000000003"]
+      toAddresses: ["0x0000000000000000000000000000000000000004"]
+      label: B
+`
+    );
+    const c = loadConfig(path);
+    expect(c.singleWebhook).toBe(true);
+    expect(c.targets).toHaveLength(2);
     rmSync(TMP, { recursive: true, force: true });
   });
 
