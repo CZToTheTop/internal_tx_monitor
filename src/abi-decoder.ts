@@ -92,6 +92,42 @@ function buildGetAbiUrl(address: string, chainId: number, apiKey: string): strin
   return `${V2_BASE}?${params}`;
 }
 
+/**
+ * Etherscan `contract/getabi` 请求速率（次/秒）。默认 3；≤0 表示不限制。
+ * 通过串行队列 + 最小发车间隔避免并发打爆限流。
+ */
+function getAbiFetchRps(): number {
+  const raw = process.env.ABI_FETCH_RPS?.trim();
+  if (raw === undefined || raw === "") return 3;
+  const n = parseFloat(raw);
+  return Number.isFinite(n) ? n : 3;
+}
+
+let abiApiRequestChain: Promise<void> = Promise.resolve();
+let lastAbiFetchStartMs = 0;
+
+function enqueueAbiApiRequest<T>(run: () => Promise<T>): Promise<T> {
+  const next = abiApiRequestChain.then(() => run());
+  abiApiRequestChain = next.then(
+    () => {},
+    () => {}
+  );
+  return next;
+}
+
+async function acquireAbiFetchSlot(): Promise<void> {
+  const rps = getAbiFetchRps();
+  if (rps <= 0) return;
+  const minGapMs = 1000 / rps;
+  const now = Date.now();
+  const wait =
+    lastAbiFetchStartMs === 0 ? 0 : Math.max(0, lastAbiFetchStartMs + minGapMs - now);
+  if (wait > 0) {
+    await new Promise<void>((resolve) => setTimeout(resolve, wait));
+  }
+  lastAbiFetchStartMs = Date.now();
+}
+
 const FETCH_TIMEOUT_MS = 30000;
 
 const proxyAgent = new EnvHttpProxyAgent();
@@ -177,36 +213,39 @@ async function getImplementationFromStorage(
   }
 }
 
-/** 从 Etherscan V2 拉取 ABI（内部，不读缓存） */
+/** 从 Etherscan V2 拉取 ABI（内部，不读缓存）；受 ABI_FETCH_RPS 速率限制 */
 async function fetchAbiFromApi(
   address: string,
   chainId: number,
   apiKey: string
 ): Promise<object[] | null> {
-  const url = buildGetAbiUrl(address, chainId, apiKey);
-  try {
-    const res = await fetchWithTimeout(url);
-    const json = (await res.json()) as {
-      status?: string;
-      message?: string;
-      result?: string;
-    };
-    if (json.status !== "1" || typeof json.result !== "string") {
-      const msg = [json.message, typeof json.result === "string" ? json.result : JSON.stringify(json.result)].filter(Boolean).join(" ");
+  return enqueueAbiApiRequest(async () => {
+    await acquireAbiFetchSlot();
+    const url = buildGetAbiUrl(address, chainId, apiKey);
+    try {
+      const res = await fetchWithTimeout(url);
+      const json = (await res.json()) as {
+        status?: string;
+        message?: string;
+        result?: string;
+      };
+      if (json.status !== "1" || typeof json.result !== "string") {
+        const msg = [json.message, typeof json.result === "string" ? json.result : JSON.stringify(json.result)].filter(Boolean).join(" ");
+        console.error(
+          `[abi-decoder] getabi 失败 address=${address} chainId=${chainId}:`,
+          msg || res.status
+        );
+        return null;
+      }
+      return JSON.parse(json.result) as object[];
+    } catch (err) {
       console.error(
-        `[abi-decoder] getabi 失败 address=${address} chainId=${chainId}:`,
-        msg || res.status
+        `[abi-decoder] getabi 请求异常 address=${address} chainId=${chainId}:`,
+        err instanceof Error ? err.message : String(err)
       );
       return null;
     }
-    return JSON.parse(json.result) as object[];
-  } catch (err) {
-    console.error(
-      `[abi-decoder] getabi 请求异常 address=${address} chainId=${chainId}:`,
-      err instanceof Error ? err.message : String(err)
-    );
-    return null;
-  }
+  });
 }
 
 /** 从 Etherscan API V2 获取合约 ABI（优先内存缓存 → 磁盘缓存 → API）
