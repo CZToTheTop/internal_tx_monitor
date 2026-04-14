@@ -8,8 +8,8 @@ alwaysApply: false
 
 ## 0. 配置文件命名（与 Git）
 
-- **入库**：仅 **`config.example.yaml`** 作为模板提交到仓库。
-- **不入库**：任意 **`config.<名称>.yaml`**（中间段自定义），例如 `config.tbill.ethereum.yaml`、`config.predic-fun.yaml`；由 `config.example.yaml` 复制后按环境/项目修改，通过 `.gitignore` 的 `config.*.yaml` + `!config.example.yaml` 排除。
+- **入库**：**`config.example.yaml`** 与 **`config.venus.example.yaml`**（Venus 协议监控模板，占位地址需替换）作为模板提交；二者由 `.gitignore` 中 `!config.venus.example.yaml` 显式放行。
+- **不入库**：其余任意 **`config.<名称>.yaml`**（中间段自定义），例如 `config.tbill.ethereum.yaml`、`config.predic-fun.yaml`；由模板复制后按环境/项目修改，通过 `config.*.yaml` + 上述例外排除。
 - **运行时顶层配置名** `config.yaml` 亦在 `.gitignore` 中（常为部署时由 example 复制或软链）。
 
 编辑任意本地 `config*.yaml` 里与**合约权限**相关的规则时，按下列顺序做，避免「凭想象写 owner/operator」或把不同 modifier 混成一条策略。

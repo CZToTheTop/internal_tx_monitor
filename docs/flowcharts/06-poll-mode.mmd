@@ -1,0 +1,5 @@
+flowchart TD
+  P0["loadConfigsFromEnv + mergeConfigsForPoll"] --> P1["Resolve network to RPC_URL"]
+  P1 --> P2["Loop: eth_blockNumber / eth_getLogs"]
+  P2 --> P3["Process events-type targets only"]
+  P3 --> P4["Parse Transfer etc. / log or extend alerts"]

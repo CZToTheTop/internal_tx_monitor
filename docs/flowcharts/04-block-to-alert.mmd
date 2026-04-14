@@ -1,0 +1,8 @@
+flowchart TD
+  EVT["Alchemy event payload"] --> PARSE["Parse block: logs / txs / callTracerTraces"]
+  PARSE --> MATCH["Filter by target: addr / topic / selector"]
+  MATCH --> DEC["Optional: ABI decode"]
+  DEC --> RULES["rules-engine: RuleCheck"]
+  RULES --> OUT{"matched?"}
+  OUT -->|yes| ALERT["Telegram / logs"]
+  OUT -->|no| DROP["Skip or debug only"]

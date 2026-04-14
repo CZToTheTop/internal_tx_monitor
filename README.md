@@ -14,6 +14,7 @@ Monitors on-chain events and internal calls via Alchemy webhooks. Supports Event
 - **Transactions**：监控发往/来自指定地址的外部交易
 - **Internal Calls**：监控内部调用（`call` / `delegatecall` / `create`），含 `input` / `output` 等
 - **Telegram**：可选推送到 TG
+- **ABI 启动预取**：`npm run monitor` 启动时按配置预拉需解码的合约 ABI 并写入 `.abi-cache/`，缺 key 或合约未验证时尽早失败（见 `.env.example` 中 `SKIP_ABI_PREFETCH` / `ABI_PREFETCH_STRICT`）
 
 ### 前置要求
 
@@ -144,6 +145,7 @@ TELEGRAM_CHAT_ID=你的Chat ID
 - **Transactions**: Monitor external transactions to/from addresses
 - **Internal Calls**: Monitor `call` / `delegatecall` / `create` with `input` / `output`
 - **Telegram**: Optional push notifications
+- **ABI prefetch on startup**: `npm run monitor` prefetches ABIs needed for decoding (per config) into `.abi-cache/`; missing `ETHERSCAN_API_KEY` or unverified contracts fail fast unless you set `SKIP_ABI_PREFETCH` / `ABI_PREFETCH_STRICT` (see `.env.example`)
 
 ### Requirements
 

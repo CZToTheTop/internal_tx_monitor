@@ -1,0 +1,29 @@
+%% Vertical layout for clearer rendering at readable size
+flowchart TD
+  subgraph chain["On-chain"]
+    RPC["Node / Alchemy"]
+  end
+
+  subgraph notify["Alchemy Notify"]
+    WH["Webhook delivery"]
+  end
+
+  RPC -->|"subscribed data"| WH
+
+  subgraph mon["Monitor service"]
+    SRV["Express : /webhook"]
+    SIG["Verify signature + route config"]
+    HND["handlers: parse & match"]
+    RE["rules-engine"]
+    TG["telegram module"]
+  end
+
+  WH -->|"HTTPS POST + signature"| SRV
+  SRV --> SIG --> HND --> RE
+  RE -->|"optional"| TG
+
+  User["Ops / developer"]
+  TGAPI["Telegram API"]
+
+  HND -->|"console logs"| User
+  TG -->|"HTTPS"| TGAPI

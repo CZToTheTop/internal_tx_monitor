@@ -1,0 +1,6 @@
+flowchart LR
+  REQ["Request"] --> SIG["HMAC match against configs signing_key"]
+  SIG --> HIT{"Exactly one Config?"}
+  HIT -->|yes| ONE["Use that Config targets"]
+  HIT -->|no| FAIL["401"]
+  ONE --> PROC["Match rules & alert"]
