@@ -1,14 +1,14 @@
-%% Vertical layout for clearer rendering at readable size
+%% Vertical layout; Etherscan = ABI only; RPC = internal trace to parent tx
 flowchart TD
   subgraph chain["On-chain"]
-    RPC["Node / Alchemy"]
+    RPCNODE["Node / Alchemy"]
   end
 
   subgraph notify["Alchemy Notify"]
     WH["Webhook delivery"]
   end
 
-  RPC -->|"subscribed data"| WH
+  RPCNODE -->|"subscribed data"| WH
 
   subgraph mon["Monitor service"]
     SRV["Express : /webhook"]
@@ -18,9 +18,16 @@ flowchart TD
     TG["telegram module"]
   end
 
+  subgraph ext["External APIs when needed"]
+    ES["Etherscan V2: contract getabi only"]
+    DBG["JSON-RPC: debug_traceBlockByNumber + block #"]
+  end
+
   WH -->|"HTTPS POST + signature"| SRV
   SRV --> SIG --> HND --> RE
   RE -->|"optional"| TG
+  HND --> ES
+  HND --> DBG
 
   User["Ops / developer"]
   TGAPI["Telegram API"]

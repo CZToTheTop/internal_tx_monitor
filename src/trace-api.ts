@@ -1,6 +1,7 @@
 /**
- * 通过 debug_traceBlockByNumber 获取 internal trace 对应的 parent external tx hash
- * RPC 来源：各链 base URL + ALCHEMY_API_KEY；或完整 ETH_RPC、BNB_RPC 等覆盖
+ * 通过 debug_traceBlockByNumber + 块号，将 webhook 中的 callTracerTraces 与区块内各笔交易的 trace 匹配，
+ * 得到 internal trace 下标 → parent external tx hash（不经过 Etherscan API）。
+ * RPC：各链 Alchemy base + ALCHEMY_API_KEY，或 ETH_RPC / BNB_RPC 等完整 URL 覆盖。
  */
 
 const RPC_BASE: Record<string, string> = {

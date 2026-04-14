@@ -62,6 +62,8 @@ Monitor is an on-chain monitoring service built on **Alchemy Notify Webhooks**. 
 | F-07 | Health | `GET /health` returns `ok` and timestamp |
 | F-08 | ABI decode | Decode inputs/logs (explorer or file ABI) |
 | F-09 | Rules engine | As implemented in code (`paramIn`, `balanceInRange`, `storageSlotEquals`, `callerNotIn`, `paramOutsideRange`, etc.) |
+| F-10 | ABI & Etherscan | `ETHERSCAN_API_KEY` **only** for V2 **`contract/getabi`** (decode, `.abi-cache`, startup prefetch). Optional `ABI_FETCH_RPS` (default ~3/s); **one retry after 1s** on getabi failure |
+| F-11 | Internal → parent tx | Same **block number** + **`debug_traceBlockByNumber`** on configured RPC (`ALCHEMY_API_KEY` or `*_RPC` URL). **Does not** use Etherscan `txlistinternal` |
 
 #### 3.2 Configuration modes (Must)
 
@@ -95,18 +97,19 @@ More channels (email, Slack, PagerDuty); persisted alerts; Prometheus metrics.
 | Availability | Process supervised; depends on Alchemy/RPC/Telegram |
 | Observability | Structured logs (webhook id, block, matched config path) |
 | Config | Clear YAML errors; merged GraphQL dedupes addresses/topics |
+| Etherscan usage | Rate-limited getabi only; no account/internal-tx APIs for parent-hash resolution |
 
 ### 5. Architecture and flowcharts
 
 The figures below are **white-background PNGs**; **diagram labels are in English** (sources: `docs/flowcharts/*.mmd`). From the repository root run:
 
-`npx @mermaid-js/mermaid-cli -i docs/flowcharts/01-architecture.mmd -o docs/flowcharts/01-architecture.png -b white`
+`npx @mermaid-js/mermaid-cli@11 -i docs/flowcharts/01-architecture.mmd -o docs/flowcharts/01-architecture.png -b white -s 2`
 
-Replace the basename or batch all `.mmd` files. Images in this file use `./flowcharts/<name>.png` relative to `docs/PRD.md`.
+Replace the basename or batch all `.mmd` files (`-s 2` improves PNG sharpness). Images in this file use `./flowcharts/<name>.png` relative to `docs/PRD.md`.
 
 #### 5.1 High-level architecture
 
-On-chain data reaches Monitor via Alchemy Notify; after verification and rules, optional Telegram delivery.
+On-chain data reaches Monitor via Alchemy Notify; handlers may call **Etherscan (getabi only)** and **JSON-RPC (e.g. `debug_traceBlockByNumber`)**; after verification and rules, optional Telegram delivery.
 
 ![High-level architecture](./flowcharts/01-architecture.png)
 
@@ -124,13 +127,13 @@ Match HMAC against each config’s `signing_key`; exactly one config continues, 
 
 #### 5.4 From payload to alert decision
 
-Parse block → filter by target → optional ABI decode → rules engine → alert if matched.
+Parse block → filter by target → **internal calls:** map each trace to a parent tx hash via **RPC + block #**; **ABI:** Etherscan getabi or disk cache → optional decode → rules engine → alert if matched.
 
 ![From block payload to alert decision](./flowcharts/04-block-to-alert.png)
 
 #### 5.5 Ops: config to production
 
-Copy config → env & public URL → setup → signing keys → `npm run monitor` → `/health`.
+Copy config → set `.env` (Alchemy key for RPC, Etherscan key for ABI, Telegram, etc.) → public URL → setup → signing keys → `npm run monitor` → `/health`.
 
 ![Config to production](./flowcharts/05-deploy-flow.png)
 
@@ -145,6 +148,8 @@ Merge configs → pick RPC → loop `eth_blockNumber` / `eth_getLogs` → handle
 - **Network:** `network` must align with RPC mapping and env vars.
 - **Signing:** Use the **raw request body** (`rawBody` in Express).
 - **GraphQL:** Merged queries dedupe addresses/topics; `methodSelectors` and `rules` apply only on the server.
+- **Etherscan API key:** Used **only** for **`contract/getabi`** (and startup prefetch into `.abi-cache/`). Not used for resolving internal-call parent transactions.
+- **Internal parent tx:** Resolved with **block number** + **`debug_traceBlockByNumber`** on the configured RPC endpoint.
 
 ### 7. Acceptance criteria
 
@@ -217,6 +222,8 @@ Monitor 是一套基于 **Alchemy Notify Webhook** 的链上监控服务：在�
 | F-07 | 健康检查 | `GET /health` 返回 `ok` 与时间戳 |
 | F-08 | ABI 解码 | 解码 input/log（浏览器或本地 ABI） |
 | F-09 | 规则引擎 | `paramIn`、`balanceInRange`、`storageSlotEquals`、`callerNotIn`、`paramOutsideRange` 等（以代码为准） |
+| F-10 | ABI 与 Etherscan | `ETHERSCAN_API_KEY` **仅**用于 V2 **`contract/getabi`**（解码、`.abi-cache`、启动预取）。可选 `ABI_FETCH_RPS`（默认约 3/s）；getabi 失败时 **等待 1 秒再重试一次** |
+| F-11 | Internal → 父交易 | 同一**块号** + 已配置 RPC 上的 **`debug_traceBlockByNumber`**（`ALCHEMY_API_KEY` 或 `*_RPC`）。**不使用** Etherscan `txlistinternal` |
 
 #### 3.2 配置模式（Must）
 
@@ -250,18 +257,19 @@ Monitor 是一套基于 **Alchemy Notify Webhook** 的链上监控服务：在�
 | 可用性 | 进程由 supervisor 等拉起；依赖 Alchemy/RPC/Telegram |
 | 可观测性 | 结构化日志（webhook id、块高、命中配置路径） |
 | 配置 | YAML 报错清晰；合并 GraphQL 对地址/topic 去重 |
+| Etherscan 使用范围 | 仅对 getabi 限流；不用账户类/internal tx 接口解析父交易 |
 
 ### 5. 系统架构与流程图
 
 下列 **PNG** 为白底导出；**流程图内文字为英文**（源文件 `docs/flowcharts/*.mmd`）。在仓库根目录执行：
 
-`npx @mermaid-js/mermaid-cli -i docs/flowcharts/01-architecture.mmd -o docs/flowcharts/01-architecture.png -b white`
+`npx @mermaid-js/mermaid-cli@11 -i docs/flowcharts/01-architecture.mmd -o docs/flowcharts/01-architecture.png -b white -s 2`
 
-可将 `01-architecture` 换成其他文件名，或对目录内全部 `.mmd` 批量执行。`docs/PRD.md` 中图片路径为 `./flowcharts/<name>.png`（相对本文件）。
+可将 `01-architecture` 换成其他文件名，或对目录内全部 `.mmd` 批量执行（`-s 2` 提高 PNG 清晰度）。`docs/PRD.md` 中图片路径为 `./flowcharts/<name>.png`（相对本文件）。
 
 #### 5.1 总体架构
 
-链上数据经 Alchemy Notify 推送至 Monitor，验签与规则处理后可选 Telegram。
+链上数据经 Alchemy Notify 推送至 Monitor；handlers 可按需调用 **Etherscan（仅 getabi）** 与 **JSON-RPC（如 `debug_traceBlockByNumber`）**，验签与规则处理后可选 Telegram。
 
 ![High-level architecture](./flowcharts/01-architecture.png)
 
@@ -279,13 +287,13 @@ HMAC 与各 `config` 的 `signing_key` 匹配，命中唯一配置后继续；�
 
 #### 5.4 从块数据到是否告警
 
-解析 block → 按 target 过滤 → 可选 ABI 解码 → 规则引擎 → 匹配则告警。
+解析 block → 按 target 过滤 → **internal_calls：** 用 **RPC + 块号** 将 trace 映射到父交易哈希；**ABI：** Etherscan getabi 或本地缓存 → 可选解码 → 规则引擎 → 匹配则告警。
 
 ![From block payload to alert decision](./flowcharts/04-block-to-alert.png)
 
 #### 5.5 运维：从配置到上线
 
-复制配置 → 环境变量与公网 URL → setup → 写入 Signing Key → `npm run monitor` → `/health`。
+复制配置 → 配置 `.env`（Alchemy RPC、Etherscan ABI、Telegram 等）与公网 URL → setup → 写入 Signing Key → `npm run monitor` → `/health`。
 
 ![Config to production](./flowcharts/05-deploy-flow.png)
 
@@ -300,6 +308,8 @@ HMAC 与各 `config` 的 `signing_key` 匹配，命中唯一配置后继续；�
 - **网络标识**：`network` 与 RPC 映射、环境变量一致。
 - **验签**：使用请求 **原始 body**（Express 保存 `rawBody`）。
 - **GraphQL**：合并查询对地址、topic 去重；`methodSelectors`、`rules` 仅在服务端生效。
+- **Etherscan API Key**：**仅**用于 **`contract/getabi`**（及启动预写入 `.abi-cache`），不用于解析 internal 父交易。
+- **Internal 父交易哈希**：依赖 **块号** + 配置 RPC 上的 **`debug_traceBlockByNumber`**。
 
 ### 7. 成功标准
 

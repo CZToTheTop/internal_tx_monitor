@@ -1,7 +1,10 @@
 flowchart TD
   EVT["Alchemy event payload"] --> PARSE["Parse block: logs / txs / callTracerTraces"]
   PARSE --> MATCH["Filter by target: addr / topic / selector"]
-  MATCH --> DEC["Optional: ABI decode"]
+  MATCH --> ABI["ABI: Etherscan getabi or .abi-cache"]
+  MATCH --> TRMAP["Internal calls: parent tx via RPC + block #"]
+  ABI --> DEC["Optional: ABI decode"]
+  TRMAP --> DEC
   DEC --> RULES["rules-engine: RuleCheck"]
   RULES --> OUT{"matched?"}
   OUT -->|yes| ALERT["Telegram / logs"]

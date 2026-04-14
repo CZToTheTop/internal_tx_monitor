@@ -8,7 +8,6 @@ import "dotenv/config";
 import { createHmac } from "crypto";
 import http from "http";
 import { loadConfigsFromEnv, mergeConfigsForPoll } from "../src/config.js";
-import { getTraceToTxMapFromExplorer } from "../src/explorer-api.js";
 import { getRpcUrl, getTraceToTxMap } from "../src/trace-api.js";
 
 const TX_HASH = process.env.TX_HASH ?? "0xc29d220ca1aebe969fbbf3e0af5a0d5bd11ff1ff8859b79f4f3ec159c2a36a17";
@@ -110,17 +109,11 @@ async function main() {
 
   console.log(`Block: ${blockNum}, 交易数: ${block.transactions?.length ?? 0}, 展平 traces: ${traces.length}`);
 
-  // 验证 trace→tx 映射：优先 Explorer API，否则 RPC
-  let map = await getTraceToTxMapFromExplorer(config.network, blockNum, traces);
-  if (map.size < traces.length && rpcUrl) {
-    const rpcMap = await getTraceToTxMap(rpcUrl, blockNum, traces);
-    for (const [k, v] of rpcMap) {
-      if (!map.has(k)) map.set(k, v);
-    }
-  }
+  // 验证 trace→tx 映射：同区块号 + RPC debug_traceBlockByNumber
+  const map = rpcUrl ? await getTraceToTxMap(rpcUrl, blockNum, traces) : new Map<number, string>();
   const targetTx = TX_HASH.toLowerCase();
   const matched = [...map.entries()].filter(([, h]) => h?.toLowerCase() === targetTx);
-  console.log(`trace→tx 映射: ${map.size} 条 (Explorer API 优先), 其中属于目标 tx 的: ${matched.length} 条`);
+  console.log(`trace→tx 映射: ${map.size} 条 (RPC), 其中属于目标 tx 的: ${matched.length} 条`);
 
   // 构建 mock webhook payload（traces 不含 transaction，触发 trace API）
   // transactions 需为 { hash } 格式；将目标 tx 放首位以便 getTxHash 能取到

@@ -1,6 +1,6 @@
 flowchart TD
   CP["Copy config.example.yaml to config.yaml"]
-  ENV["Set .env: PORT, TELEGRAM*, RPC*"]
+  ENV["Set .env: ALCHEMY_API_KEY, ETHERSCAN_API_KEY for ABI, TELEGRAM*, PORT"]
   TUN["Public URL: cloud VM or Cloudflare Tunnel"]
   CP --> SETUP["npm run setup: create Webhook"]
   TUN --> WHURL["Set webhookUrl in yaml"]

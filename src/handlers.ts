@@ -1,7 +1,6 @@
 import type { Config, MonitorTarget, WebhookGroup } from "./config.js";
 import type { AlchemyWebhookEvent, WebhookDispatch } from "./webhook-util.js";
 import { sendTelegram, getExplorerBase } from "./telegram.js";
-import { getTraceToTxMapFromExplorer } from "./explorer-api.js";
 import { getRpcUrl, getTraceToTxMap } from "./trace-api.js";
 import {
   decodeInput,
@@ -313,25 +312,19 @@ async function alertByTargetMatch(
   }
 
   // method 命中（internal call）时：看 trace 对应 config 里哪个 internal_calls 条目，用该条目的 label
-  // parent tx 获取顺序：1) trace.transaction 2) Explorer API 3) RPC debug_trace 4) 单 tx 区块启发式 5) fallback
+  // parent tx：1) trace.transaction / transactionHash 2) 同区块 RPC debug_traceBlockByNumber 匹配 3) block 内首笔 tx 等启发式
   const traces = block?.callTracerTraces ?? [];
   let traceToTxMap = new Map<number, string>();
   const blockNum = parseBlockNumber(block?.number);
   const tracePayload = traces as Array<{ from?: { address?: string }; to?: { address?: string }; input?: string }>;
 
   if (traces.length > 0 && blockNum != null) {
-    traceToTxMap = await getTraceToTxMapFromExplorer(config.network, blockNum, tracePayload);
-    if (traceToTxMap.size < traces.length) {
-      const rpcUrl = getRpcUrl(config.network);
-      if (rpcUrl) {
-        try {
-          const rpcMap = await getTraceToTxMap(rpcUrl, blockNum, tracePayload);
-          for (const [k, v] of rpcMap) {
-            if (!traceToTxMap.has(k)) traceToTxMap.set(k, v);
-          }
-        } catch {
-          // 忽略 RPC 失败
-        }
+    const rpcUrl = getRpcUrl(config.network);
+    if (rpcUrl) {
+      try {
+        traceToTxMap = await getTraceToTxMap(rpcUrl, blockNum, tracePayload);
+      } catch {
+        // 忽略 RPC 失败（部分节点无 debug API）
       }
     }
   }

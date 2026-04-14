@@ -16,6 +16,16 @@ Monitors on-chain events and internal calls via Alchemy webhooks. Supports Event
 - **Telegram**：可选推送到 TG
 - **ABI 启动预取**：`npm run monitor` 启动时按配置预拉需解码的合约 ABI 并写入 `.abi-cache/`，缺 key 或合约未验证时尽早失败（见 `.env.example` 中 `SKIP_ABI_PREFETCH` / `ABI_PREFETCH_STRICT`）
 
+### 密钥与外部服务（简要）
+
+| 用途 | 环境变量 / 说明 |
+|------|----------------|
+| Alchemy Webhook | `ALCHEMY_AUTH_TOKEN`（`npm run setup`）；入站验签用各 yaml 的 `signing_key` |
+| RPC（含 internal 父交易） | `ALCHEMY_API_KEY` 拼到内置 Alchemy URL，或 `ETH_RPC`、`BNB_RPC` 等**完整 URL** 覆盖。**Internal call → 父交易哈希**依赖同区块 **`debug_traceBlockByNumber`**（需支持 debug 的节点；**不再**走 Etherscan `txlistinternal`） |
+| 合约 ABI | `ETHERSCAN_API_KEY`：**仅**用于 Etherscan V2 **`contract/getabi`**（解码、启动预取、`.abi-cache`）。可选 **`ABI_FETCH_RPS`**（默认约 3 次/秒）、getabi 失败会 **等待 1 秒再重试一次** |
+
+产品说明与架构图见 **[docs/PRD.md](docs/PRD.md)**。
+
 ### 前置要求
 
 1. [Alchemy](https://www.alchemy.com/) 账号
@@ -147,6 +157,16 @@ TELEGRAM_CHAT_ID=你的Chat ID
 - **Telegram**: Optional push notifications
 - **ABI prefetch on startup**: `npm run monitor` prefetches ABIs needed for decoding (per config) into `.abi-cache/`; missing `ETHERSCAN_API_KEY` or unverified contracts fail fast unless you set `SKIP_ABI_PREFETCH` / `ABI_PREFETCH_STRICT` (see `.env.example`)
 
+### Keys & external services (summary)
+
+| Purpose | Env / notes |
+|---------|-------------|
+| Alchemy webhooks | `ALCHEMY_AUTH_TOKEN` for `npm run setup`; inbound verification uses per-yaml `signing_key` |
+| RPC (incl. internal → parent tx) | `ALCHEMY_API_KEY` on built-in Alchemy URLs, or full `ETH_RPC` / `BNB_RPC` overrides. **Parent tx for internal calls** uses **`debug_traceBlockByNumber` on the same block** (needs a debug-capable endpoint; **Etherscan `txlistinternal` is not used**). |
+| Contract ABI | `ETHERSCAN_API_KEY`: **only** Etherscan V2 **`contract/getabi`** (decode, prefetch, `.abi-cache`). Optional **`ABI_FETCH_RPS`** (default ~3/s); **1s wait then one retry** on getabi failure. |
+
+See **[docs/PRD.md](docs/PRD.md)** for PRD and architecture diagrams.
+
 ### Requirements
 
 1. [Alchemy](https://www.alchemy.com/) account
@@ -242,6 +262,9 @@ Create bot via [@BotFather](https://t.me/BotFather); get chat_id from `https://a
 
 ```
 monitor/
+├── docs/
+│   ├── PRD.md                     # Product requirements + flowcharts (PNG)
+│   └── flowcharts/                # Mermaid sources + exported images
 ├── config.yaml                    # Your config (gitignored)
 ├── config.example.yaml            # Config template
 ├── config.tbill.ethereum.yaml   # TBILL: ETH — admin / oracle / KYC (no user flows)
@@ -256,6 +279,9 @@ monitor/
 │   ├── config.ts        # Config loader
 │   ├── graphql.ts       # GraphQL query builder
 │   ├── alchemy-api.ts   # Alchemy Notify API
+│   ├── abi-decoder.ts   # ABI cache + Etherscan getabi
+│   ├── abi-prefetch.ts  # Startup ABI prefetch
+│   ├── trace-api.ts     # RPC debug_traceBlockByNumber → parent tx for traces
 │   ├── webhook-util.ts  # Signature validation
 │   ├── setup.ts         # Webhook creation
 │   ├── poll.ts          # Polling mode
@@ -276,6 +302,7 @@ monitor/
 - **Alchemy cannot reach webhook**: Deploy to a public server (Aliyun, Railway, etc.) instead of local tunnel.
 - **fromList.map is not a function**: Fix YAML format — use `- "0x..."` (space after `-`), not `-["0x..."]`.
 - **GraphQL 地址数量少于 yaml / Fewer addresses in GraphQL**: 合并查询会对地址与 topic **去重**；细粒度条件（`rules`、`methodSelectors`）仅在服务端生效，不会写进 GraphQL。Merged queries **dedupe** addresses/topics; rules and selectors are server-side only.
+- **Internal call 告警里缺少父交易哈希 / Missing parent tx for internal calls**: 父交易由 **RPC `debug_traceBlockByNumber`** 解析，需配置 **支持 debug 的端点**（如 Alchemy）；仅提供区块浏览器的 HTTP RPC、且不支持该方法时，映射可能为空。**Parent tx** is resolved via **`debug_traceBlockByNumber`**; use an RPC that exposes it (e.g. Alchemy). Public nodes often omit debug APIs.
 
 ## References
 
