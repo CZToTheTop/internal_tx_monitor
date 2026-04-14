@@ -213,38 +213,57 @@ async function getImplementationFromStorage(
   }
 }
 
-/** 从 Etherscan V2 拉取 ABI（内部，不读缓存）；受 ABI_FETCH_RPS 速率限制 */
+/** getabi 首次失败后等待再重试一次；仅第二次仍失败时打日志 */
+const GETABI_RETRY_DELAY_MS = 1000;
+
+/** 从 Etherscan V2 拉取 ABI（内部，不读缓存）；受 ABI_FETCH_RPS 速率限制；失败时等候 1s 再试一次 */
 async function fetchAbiFromApi(
   address: string,
   chainId: number,
   apiKey: string
 ): Promise<object[] | null> {
   return enqueueAbiApiRequest(async () => {
-    await acquireAbiFetchSlot();
-    const url = buildGetAbiUrl(address, chainId, apiKey);
-    try {
-      const res = await fetchWithTimeout(url);
-      const json = (await res.json()) as {
-        status?: string;
-        message?: string;
-        result?: string;
-      };
-      if (json.status !== "1" || typeof json.result !== "string") {
-        const msg = [json.message, typeof json.result === "string" ? json.result : JSON.stringify(json.result)].filter(Boolean).join(" ");
-        console.error(
-          `[abi-decoder] getabi 失败 address=${address} chainId=${chainId}:`,
-          msg || res.status
-        );
-        return null;
+    const attempt = async (): Promise<{ abi: object[] | null; detail: string }> => {
+      await acquireAbiFetchSlot();
+      const url = buildGetAbiUrl(address, chainId, apiKey);
+      try {
+        const res = await fetchWithTimeout(url);
+        const json = (await res.json()) as {
+          status?: string;
+          message?: string;
+          result?: string;
+        };
+        if (json.status !== "1" || typeof json.result !== "string") {
+          const msg = [json.message, typeof json.result === "string" ? json.result : JSON.stringify(json.result)]
+            .filter(Boolean)
+            .join(" ");
+          return { abi: null, detail: msg || String(res.status) };
+        }
+        const abi = JSON.parse(json.result) as object[];
+        if (!abi?.length) {
+          return { abi: null, detail: "empty ABI array" };
+        }
+        return { abi, detail: "" };
+      } catch (err) {
+        return {
+          abi: null,
+          detail: err instanceof Error ? err.message : String(err),
+        };
       }
-      return JSON.parse(json.result) as object[];
-    } catch (err) {
-      console.error(
-        `[abi-decoder] getabi 请求异常 address=${address} chainId=${chainId}:`,
-        err instanceof Error ? err.message : String(err)
-      );
-      return null;
-    }
+    };
+
+    let { abi, detail } = await attempt();
+    if (abi?.length) return abi;
+
+    await new Promise<void>((resolve) => setTimeout(resolve, GETABI_RETRY_DELAY_MS));
+
+    ({ abi, detail } = await attempt());
+    if (abi?.length) return abi;
+
+    console.error(
+      `[abi-decoder] getabi 失败（已重试 1 次）address=${address} chainId=${chainId}: ${detail}`
+    );
+    return null;
   });
 }
 
