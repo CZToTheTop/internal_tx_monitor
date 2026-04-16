@@ -1,7 +1,6 @@
 import type { Config, MonitorTarget, WebhookGroup } from "./config.js";
 import type { AlchemyWebhookEvent, WebhookDispatch } from "./webhook-util.js";
 import { sendTelegram, getExplorerBase } from "./telegram.js";
-import { getRpcUrl, getTraceToTxMap } from "./trace-api.js";
 import {
   decodeInput,
   decodeLog,
@@ -312,31 +311,18 @@ async function alertByTargetMatch(
   }
 
   // method 命中（internal call）时：看 trace 对应 config 里哪个 internal_calls 条目，用该条目的 label
-  // parent tx：1) trace.transaction / transactionHash 2) 同区块 RPC debug_traceBlockByNumber 匹配 3) block 内首笔 tx 等启发式
+  // parent tx：仅使用 webhook 自带 trace.transaction / transactionHash（再回退 block 内首笔 tx 等启发式）
   const traces = block?.callTracerTraces ?? [];
-  let traceToTxMap = new Map<number, string>();
-  const blockNum = parseBlockNumber(block?.number);
-  const tracePayload = traces as Array<{ from?: { address?: string }; to?: { address?: string }; input?: string }>;
-
-  if (traces.length > 0 && blockNum != null) {
-    const rpcUrl = getRpcUrl(config.network);
-    if (rpcUrl) {
-      try {
-        traceToTxMap = await getTraceToTxMap(rpcUrl, blockNum, tracePayload);
-      } catch {
-        // 忽略 RPC 失败（部分节点无 debug API）
-      }
-    }
-  }
   for (let i = 0; i < traces.length; i++) {
     const trace = traces[i]!;
     const matched = matchTraceToTargets(
       trace as { from?: { address?: string }; to?: { address?: string }; input?: string },
       internalTargets
     );
-    const txHash =
-      traceToTxMap.get(i) ??
-      getTxHashFromItem(trace as { transaction?: { hash?: string }; transactionHash?: string }, blockTx0);
+    const txHash = getTxHashFromItem(
+      trace as { transaction?: { hash?: string }; transactionHash?: string },
+      blockTx0
+    );
     const inp = (trace as { input?: string }).input ?? "";
     const toAddr = (trace as { to?: { address?: string } }).to?.address;
     for (const t of matched) {
