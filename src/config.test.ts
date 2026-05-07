@@ -103,6 +103,7 @@ targets:
     expect(configs[1]!.targets[0]!.label).toBe("B");
     const merged = mergeConfigsForPoll(configs);
     expect(merged.targets).toHaveLength(2);
+    expect(merged.alerts).toBeUndefined();
     rmSync(TMP, { recursive: true, force: true });
   });
 
@@ -111,6 +112,32 @@ targets:
     vi.stubEnv("CONFIG_PATH", "");
     expect(resolveConfigPathsFromEnv()).toEqual(["a.yaml", "b.yaml"]);
     vi.unstubAllEnvs();
+  });
+
+  it("loads alerts.telegram with snake_case env names", () => {
+    mkdirSync(TMP, { recursive: true });
+    const path = join(TMP, "alerts.yaml");
+    writeFileSync(
+      path,
+      `
+network: bsc_mainnet
+webhookUrl: https://x.com
+alerts:
+  telegram:
+    bot_token_env: MY_BOT_TOKEN
+    chat_id_env: MY_CHAT_ID
+targets:
+  signing_key: whsec_x
+  list:
+    - type: events
+      addresses: ["0x0000000000000000000000000000000000000001"]
+      label: L1
+`
+    );
+    const c = loadConfig(path);
+    expect(c.alerts?.telegram?.botTokenEnv).toBe("MY_BOT_TOKEN");
+    expect(c.alerts?.telegram?.chatIdEnv).toBe("MY_CHAT_ID");
+    rmSync(TMP, { recursive: true, force: true });
   });
 
   it("throws when network missing", () => {

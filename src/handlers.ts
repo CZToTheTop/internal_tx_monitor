@@ -240,7 +240,7 @@ async function alertByTargetMatch(
       const network = t.network ?? config.network;
       if (!t.rules?.length) {
         // 兼容旧行为：未配置 rules 时，命中即报警
-        sendTelegram(buildTelegramMessage(network, txHash, label, "log")).catch(() => {});
+        await sendTelegram(buildTelegramMessage(network, txHash, label, "log"), config.alerts?.telegram);
         continue;
       }
 
@@ -272,8 +272,9 @@ async function alertByTargetMatch(
         const first = ruleResults[0]!;
         const ruleInfo =
           (first.rule.name ?? "rule") + (first.reason ? `: ${first.reason}` : "");
-        sendTelegram(buildTelegramMessage(network, txHash, label, "log", undefined, undefined, ruleInfo)).catch(
-          () => {}
+        await sendTelegram(
+          buildTelegramMessage(network, txHash, label, "log", undefined, undefined, ruleInfo),
+          config.alerts?.telegram
         );
       }
     }
@@ -288,7 +289,7 @@ async function alertByTargetMatch(
       const label = t.label ?? "Monitor";
       const network = t.network ?? config.network;
       if (!t.rules?.length) {
-        sendTelegram(buildTelegramMessage(network, txHash, label, "tx")).catch(() => {});
+        await sendTelegram(buildTelegramMessage(network, txHash, label, "tx"), config.alerts?.telegram);
         continue;
       }
 
@@ -303,8 +304,9 @@ async function alertByTargetMatch(
         const first = ruleResults[0]!;
         const ruleInfo =
           (first.rule.name ?? "rule") + (first.reason ? `: ${first.reason}` : "");
-        sendTelegram(buildTelegramMessage(network, txHash, label, "tx", undefined, undefined, ruleInfo)).catch(
-          () => {}
+        await sendTelegram(
+          buildTelegramMessage(network, txHash, label, "tx", undefined, undefined, ruleInfo),
+          config.alerts?.telegram
         );
       }
     }
@@ -336,9 +338,10 @@ async function alertByTargetMatch(
 
       if (!t.rules?.length) {
         // 未配置 rules：保持原有简单报警行为
-        sendTelegram(
-          buildTelegramMessage(network, txHash, label, "internal_call", inp, decoded)
-        ).catch(() => {});
+        await sendTelegram(
+          buildTelegramMessage(network, txHash, label, "internal_call", inp, decoded),
+          config.alerts?.telegram
+        );
         continue;
       }
 
@@ -357,9 +360,10 @@ async function alertByTargetMatch(
         const first = ruleResults[0]!;
         const ruleInfo =
           (first.rule.name ?? "rule") + (first.reason ? `: ${first.reason}` : "");
-        sendTelegram(
-          buildTelegramMessage(network, txHash, label, "internal_call", inp, decoded, ruleInfo)
-        ).catch(() => {});
+        await sendTelegram(
+          buildTelegramMessage(network, txHash, label, "internal_call", inp, decoded, ruleInfo),
+          config.alerts?.telegram
+        );
       }
     }
   }

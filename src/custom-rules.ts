@@ -322,13 +322,24 @@ registerCustomRuleHandler("eventErc20UsdAbove", async (ctx, rule, _state): Promi
   const tokenIdx = Number(rule.params?.tokenArgIndex ?? 1);
   const amountIdx = Number(rule.params?.amountArgIndex ?? 2);
   const args = ctx.args;
-  if (tokenIdx < 0 || amountIdx < 0 || tokenIdx >= args.length || amountIdx >= args.length) return null;
+  const fixedRaw = (rule.params?.fixedTokenAddress as string | undefined)?.trim();
+  let tokenStr: string;
+  if (fixedRaw) {
+    try {
+      tokenStr = getAddress(fixedRaw);
+    } catch {
+      return null;
+    }
+  } else {
+    if (tokenIdx < 0 || amountIdx < 0 || tokenIdx >= args.length || amountIdx >= args.length) return null;
+    const token = args[tokenIdx];
+    if (token == null) return null;
+    tokenStr = typeof token === "string" ? token : String(token);
+  }
 
-  const token = args[tokenIdx];
+  if (amountIdx < 0 || amountIdx >= args.length) return null;
   const amountRaw = args[amountIdx];
-  if (token == null || amountRaw == null) return null;
-
-  const tokenStr = typeof token === "string" ? token : String(token);
+  if (amountRaw == null) return null;
   let amountBn: bigint;
   try {
     amountBn = BigInt(String(amountRaw));
@@ -350,6 +361,109 @@ registerCustomRuleHandler("eventErc20UsdAbove", async (ctx, rule, _state): Promi
       rule,
       matched: true,
       reason: `${label} token=${tokenStr} 约 $${usd.toFixed(2)} USD，超过阈值 $${threshold}`,
+    };
+  }
+  return { rule, matched: false };
+});
+
+/**
+ * Venus vToken 协议事件：按 **底层资产** 数量换算 USD（不监听 ERC20 Transfer）。
+ * 依赖 log 合约地址上的 `underlying()`；失败时可用 `wrappedNativeAddress` 作为 vBNB 等市场的计价替代。
+ *
+ * params:
+ * - `usdThreshold`：默认 1_000_000
+ * - `wrappedNativeAddress`：如 BSC WBNB，供无 `underlying()` 时回退
+ * - `amountArgByEvent`：可选，覆盖各事件里「底层资产数量」参数下标（默认见实现内建表）
+ */
+registerCustomRuleHandler("venusVTokenLogUsdAbove", async (ctx, rule, state): Promise<RuleResult | null> => {
+  if (ctx.kind !== "log" || !ctx.args?.length) return null;
+  if (!state.callView) {
+    return {
+      rule,
+      matched: true,
+      reason: "venusVTokenLogUsdAbove 需要 callView 以读取 underlying()",
+    };
+  }
+
+  const threshold = Number(rule.params?.usdThreshold ?? 1_000_000);
+  if (!Number.isFinite(threshold) || threshold < 0) return null;
+
+  const en = ctx.eventName ?? "";
+  const defaultIdx: Record<string, number> = {
+    Mint: 1,
+    MintBehalf: 2,
+    Redeem: 1,
+    Borrow: 1,
+    RepayBorrow: 2,
+    LiquidateBorrow: 2,
+    ReservesReduced: 1,
+  };
+  const overrides = (rule.params?.amountArgByEvent as Record<string, number> | undefined) ?? {};
+  const amountIdx = overrides[en] ?? defaultIdx[en];
+  if (amountIdx === undefined) return null;
+
+  const args = ctx.args;
+  if (amountIdx < 0 || amountIdx >= args.length) return null;
+  const amountRaw = args[amountIdx];
+  if (amountRaw == null) return null;
+  let amountBn: bigint;
+  try {
+    amountBn = BigInt(String(amountRaw));
+  } catch {
+    return null;
+  }
+
+  const log = ctx.log as { account?: { address?: string } } | undefined;
+  const vt = log?.account?.address?.trim();
+  if (!vt) return null;
+
+  let tokenStr: string | null = null;
+  try {
+    const u = await state.callView(
+      vt,
+      "function underlying() view returns (address)",
+      []
+    );
+    const raw = u !== undefined && u !== null ? String(u) : "";
+    if (raw && /^0x[a-fA-F0-9]{40}$/.test(raw) && raw.toLowerCase() !== "0x0000000000000000000000000000000000000000") {
+      tokenStr = getAddress(raw);
+    }
+  } catch {
+    tokenStr = null;
+  }
+
+  if (!tokenStr) {
+    const w = (rule.params?.wrappedNativeAddress as string | undefined)?.trim();
+    if (w) {
+      try {
+        tokenStr = getAddress(w);
+      } catch {
+        tokenStr = null;
+      }
+    }
+  }
+
+  if (!tokenStr) {
+    return {
+      rule,
+      matched: true,
+      reason: `无法解析 ${vt} 的 underlying，且未配置 wrappedNativeAddress`,
+    };
+  }
+
+  const usd = await erc20TransferUsdValue(ctx.network, tokenStr, amountBn);
+  if (usd === null) {
+    return {
+      rule,
+      matched: true,
+      reason: `${en} 无法对底层 token ${tokenStr} 估算 USD`,
+    };
+  }
+  if (usd > threshold) {
+    return {
+      rule,
+      matched: true,
+      reason: `${en} 底层≈$${usd.toFixed(2)} USD（阈值 $${threshold}） vToken=${vt}`,
     };
   }
   return { rule, matched: false };

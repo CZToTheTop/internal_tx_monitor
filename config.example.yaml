@@ -10,6 +10,15 @@ network: eth_mainnet
 # 公网可访问的 Webhook 地址（Alchemy 会向此 URL 推送数据）
 webhookUrl: https://your-server.com/webhook
 
+# ---------- 告警渠道（可选，按配置文件独立） ----------
+# 未配置时使用进程环境变量 TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID。
+# 多 yaml（CONFIG_PATHS）时每个文件可指定不同群组或不同 Bot（token 建议走 *_env，勿提交密钥）。
+# alerts:
+#   telegram:
+#     chat_id: "-100xxxxxxxxxx"
+#     # bot_token_env: TELEGRAM_BOT_TOKEN_PROJECT_A
+#     # chat_id_env: TELEGRAM_CHAT_ID_PROJECT_A
+
 # 单 Webhook 模式（targets 为 { signing_key, list: [ ... ] } 时）：
 #   可省略本行：加载时默认 singleWebhook=true，npm run setup 会生成「合并一条」GraphQL（所有 to/from 地址去重进同一 filter）
 #   显式 false = 每个 target 单独一条 GraphQL / 多个 Webhook

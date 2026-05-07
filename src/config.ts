@@ -185,6 +185,26 @@ export interface WebhookGroup {
   targets: MonitorTarget[];
 }
 
+/**
+ * 单份 yaml 的 Telegram 告警渠道（覆盖全局 TELEGRAM_* 环境变量）。
+ * YAML 可用 snake_case：`bot_token`、`chat_id`、`bot_token_env`、`chat_id_env`。
+ */
+export interface TelegramAlertChannel {
+  /** 直接使用 Bot Token（不推荐入库；优先用 botTokenEnv） */
+  botToken?: string;
+  /** 直接使用 Chat ID */
+  chatId?: string;
+  /** 从该环境变量读取 token，默认 TELEGRAM_BOT_TOKEN */
+  botTokenEnv?: string;
+  /** 从该环境变量读取 chat_id，默认 TELEGRAM_CHAT_ID */
+  chatIdEnv?: string;
+}
+
+/** 告警渠道（可按渠道扩展） */
+export interface AlertsConfig {
+  telegram?: TelegramAlertChannel;
+}
+
 /** 主配置 */
 export interface Config {
   /** 监听的链/网络 */
@@ -207,6 +227,37 @@ export interface Config {
    * 配置为 targets: [ { signing_key, list: [...] }, { signing_key, list: [...] } ] 时解析得到。
    */
   webhookGroups?: WebhookGroup[];
+  /** 该配置文件独享的告警渠道；未配置时仍使用进程级 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID */
+  alerts?: AlertsConfig;
+}
+
+function parseTelegramAlert(raw: unknown): TelegramAlertChannel | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  const botToken = (o.bot_token ?? o.botToken) as string | undefined;
+  const chatId = (o.chat_id ?? o.chatId) as string | undefined;
+  const botTokenEnv = (o.bot_token_env ?? o.botTokenEnv) as string | undefined;
+  const chatIdEnv = (o.chat_id_env ?? o.chatIdEnv) as string | undefined;
+  const has =
+    (typeof botToken === "string" && botToken.trim() !== "") ||
+    (typeof chatId === "string" && chatId.trim() !== "") ||
+    (typeof botTokenEnv === "string" && botTokenEnv.trim() !== "") ||
+    (typeof chatIdEnv === "string" && chatIdEnv.trim() !== "");
+  if (!has) return undefined;
+  return {
+    botToken: typeof botToken === "string" ? botToken : undefined,
+    chatId: typeof chatId === "string" ? chatId : undefined,
+    botTokenEnv: typeof botTokenEnv === "string" ? botTokenEnv.trim() : undefined,
+    chatIdEnv: typeof chatIdEnv === "string" ? chatIdEnv.trim() : undefined,
+  };
+}
+
+function parseAlerts(parsed: Record<string, unknown>): AlertsConfig | undefined {
+  const raw = parsed.alerts;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const telegram = parseTelegramAlert((raw as { telegram?: unknown }).telegram);
+  if (!telegram) return undefined;
+  return { telegram };
 }
 
 const NETWORK_MAP: Record<string, string> = {
@@ -314,6 +365,7 @@ export function loadConfig(path?: string): Config {
     singleWebhook,
     singleWebhookSigningKey,
     webhookGroups,
+    alerts: parseAlerts(parsed),
     configPath: realPath,
   };
 }
@@ -367,5 +419,7 @@ export function mergeConfigsForPoll(configs: Config[]): Config {
     ...first,
     targets: configs.flatMap((c) => c.targets),
     configPath: first.configPath,
+    /** 多文件合并轮询时无法对应单一告警渠道，避免误发到错误群组 */
+    alerts: undefined,
   };
 }
