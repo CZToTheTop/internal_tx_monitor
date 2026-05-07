@@ -15,6 +15,8 @@
     "test:tx:webhook": "tsx scripts/test-tx-webhook.ts",
     "test:webhook": "bash scripts/test-webhook.sh",
     "test:webhook:local": "tsx scripts/test-webhook-signed.ts",
+    "test:alert": "tsx scripts/test-alert.ts",
+    "test:venus:mock": "tsx scripts/mock-venus-webhook.ts",
     "test": "vitest run",
     "poll": "tsx src/poll.ts",
     "setup:guide": "tsx scripts/setup-webhook-guide.ts"

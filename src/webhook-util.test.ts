@@ -101,4 +101,36 @@ describe("resolveWebhookDispatch", () => {
     expect(resolveWebhookDispatch([c], body, sig, ["whsec_env"])).not.toBeNull();
     expect(resolveWebhookDispatch([c, c], body, sig, ["whsec_env"])).toBeNull();
   });
+
+  it("returns the matched config object so per-file alerts stay with the right project", () => {
+    const c1: Config = {
+      network: "ETH_MAINNET",
+      targets: [],
+      webhookUrl: "",
+      configPath: "/app/config-a.yaml",
+      alerts: { telegram: { chatId: "-100111" } },
+      webhookGroups: [
+        { signingKey: "whsec_proj_a", targets: [{ type: "events", addresses: ["0xaa"], label: "A" }] },
+      ],
+    };
+    const c2: Config = {
+      network: "ETH_MAINNET",
+      targets: [],
+      webhookUrl: "",
+      configPath: "/app/config-b.yaml",
+      alerts: { telegram: { chatId: "-100222" } },
+      webhookGroups: [
+        { signingKey: "whsec_proj_b", targets: [{ type: "events", addresses: ["0xbb"], label: "B" }] },
+      ],
+    };
+    const sigB = createHmac("sha256", "whsec_proj_b").update(body, "utf8").digest("hex");
+    const d = resolveWebhookDispatch([c1, c2], body, sigB, []);
+    expect(d?.config.configPath).toBe("/app/config-b.yaml");
+    expect(d?.config.alerts?.telegram?.chatId).toBe("-100222");
+    expect(d?.matchedGroup?.targets[0]?.label).toBe("B");
+
+    const sigA = createHmac("sha256", "whsec_proj_a").update(body, "utf8").digest("hex");
+    const da = resolveWebhookDispatch([c1, c2], body, sigA, []);
+    expect(da?.config.alerts?.telegram?.chatId).toBe("-100111");
+  });
 });
